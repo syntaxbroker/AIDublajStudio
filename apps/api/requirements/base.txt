@@ -1,0 +1,14 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+sqlalchemy==2.0.40
+psycopg[binary]==3.2.9
+pydantic-settings==2.9.1
+python-multipart==0.0.20
+PyJWT==2.10.1
+passlib[bcrypt]==1.7.4
+email-validator==2.2.0
+redis==5.2.1
+pytest==8.3.5
+httpx==0.28.1
+requests==2.32.5
+faster-whisper==1.1.1

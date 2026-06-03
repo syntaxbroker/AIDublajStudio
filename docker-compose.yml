@@ -1,0 +1,154 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: aidublaj-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aidublaj}
+      POSTGRES_USER: ${POSTGRES_USER:-aidublaj}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aidublaj}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aidublaj} -d ${POSTGRES_DB:-aidublaj}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: aidublaj-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    profiles: ["app"]
+    image: python:3.12-slim
+    container_name: aidublaj-api-dev
+    working_dir: /workspace/apps/api
+    command: sh -c "pip install -r requirements/base.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aidublaj}:${POSTGRES_PASSWORD:-aidublaj}@postgres:5432/${POSTGRES_DB:-aidublaj}
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /workspace/storage/projects
+      PYTHONPATH: /workspace/apps/api
+      ASR_PROVIDER: ${ASR_PROVIDER:-mock}
+      ASR_SOURCE_LANGUAGE: ${ASR_SOURCE_LANGUAGE:-auto}
+      ASR_MODEL_SIZE: ${ASR_MODEL_SIZE:-tiny}
+      ASR_DEVICE: ${ASR_DEVICE:-auto}
+      ASR_COMPUTE_TYPE: ${ASR_COMPUTE_TYPE:-auto}
+      TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-mock}
+      TRANSLATION_TARGET_LANGUAGE: ${TRANSLATION_TARGET_LANGUAGE:-tr}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
+      OLLAMA_TRANSLATION_MODEL: ${OLLAMA_TRANSLATION_MODEL:-qwen2.5:7b}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_TRANSLATION_MODEL: ${OPENAI_TRANSLATION_MODEL:-gpt-4.1-mini}
+      TTS_PROVIDER: ${TTS_PROVIDER:-mock}
+      TTS_VOICE_NAME: ${TTS_VOICE_NAME:-default}
+      EDGE_TTS_VOICE: ${EDGE_TTS_VOICE:-tr-TR-AhmetNeural}
+      PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-}
+      COSYVOICE_MODEL_PATH: ${COSYVOICE_MODEL_PATH:-}
+      DIARIZATION_PROVIDER: ${DIARIZATION_PROVIDER:-mock}
+      PYANNOTE_AUTH_TOKEN: ${PYANNOTE_AUTH_TOKEN:-}
+      PYANNOTE_PIPELINE_NAME: ${PYANNOTE_PIPELINE_NAME:-pyannote/speaker-diarization-3.1}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    profiles: ["app"]
+    image: node:22-alpine
+    container_name: aidublaj-web-dev
+    working_dir: /workspace/apps/web
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
+    environment:
+      VITE_API_BASE_URL: http://localhost:${API_PORT:-8000}/api/v1
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - api
+
+  worker-gpu-0:
+    profiles: ["app"]
+    image: python:3.12-slim
+    container_name: aidublaj-worker-gpu-0-dev
+    working_dir: /workspace/workers/gpu
+    command: sh -c "pip install -r /workspace/apps/api/requirements/base.txt && python app/main.py"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aidublaj}:${POSTGRES_PASSWORD:-aidublaj}@postgres:5432/${POSTGRES_DB:-aidublaj}
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /workspace/storage/projects
+      WORKER_NAME: worker-gpu-0
+      GPU_DEVICE_ID: 0
+      PYTHONPATH: /workspace/apps/api:/workspace/workers/gpu
+      ASR_PROVIDER: ${ASR_PROVIDER:-mock}
+      ASR_SOURCE_LANGUAGE: ${ASR_SOURCE_LANGUAGE:-auto}
+      ASR_MODEL_SIZE: ${ASR_MODEL_SIZE:-tiny}
+      ASR_DEVICE: ${ASR_DEVICE:-auto}
+      ASR_COMPUTE_TYPE: ${ASR_COMPUTE_TYPE:-auto}
+      TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-mock}
+      TRANSLATION_TARGET_LANGUAGE: ${TRANSLATION_TARGET_LANGUAGE:-tr}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
+      OLLAMA_TRANSLATION_MODEL: ${OLLAMA_TRANSLATION_MODEL:-qwen2.5:7b}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_TRANSLATION_MODEL: ${OPENAI_TRANSLATION_MODEL:-gpt-4.1-mini}
+      TTS_PROVIDER: ${TTS_PROVIDER:-mock}
+      TTS_VOICE_NAME: ${TTS_VOICE_NAME:-default}
+      EDGE_TTS_VOICE: ${EDGE_TTS_VOICE:-tr-TR-AhmetNeural}
+      PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-}
+      COSYVOICE_MODEL_PATH: ${COSYVOICE_MODEL_PATH:-}
+      DIARIZATION_PROVIDER: ${DIARIZATION_PROVIDER:-mock}
+      PYANNOTE_AUTH_TOKEN: ${PYANNOTE_AUTH_TOKEN:-}
+      PYANNOTE_PIPELINE_NAME: ${PYANNOTE_PIPELINE_NAME:-pyannote/speaker-diarization-3.1}
+    volumes:
+      - ./:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker-media:
+    profiles: ["app"]
+    image: python:3.12-slim
+    container_name: aidublaj-worker-media-dev
+    working_dir: /workspace/workers/media
+    command: sh -c "apt-get update && apt-get install -y ffmpeg && pip install -r /workspace/apps/api/requirements/base.txt && python app/main.py"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aidublaj}:${POSTGRES_PASSWORD:-aidublaj}@postgres:5432/${POSTGRES_DB:-aidublaj}
+      REDIS_URL: redis://redis:6379/1
+      STORAGE_ROOT: /workspace/storage/projects
+      WORKER_NAME: worker-media
+      PYTHONPATH: /workspace/apps/api:/workspace/workers/media
+    volumes:
+      - ./:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
