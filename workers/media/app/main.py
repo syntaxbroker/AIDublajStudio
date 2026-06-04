@@ -2,9 +2,13 @@ import os
 import time
 
 from app.db.session import SessionLocal
+from app.core.enums import JobType
 from app.repositories.job_repository import JobRepository
+from app.services.render_service import RenderService
+from app.services.audio_mix_service import AudioMixService
 from app.services.job_service import JobService
 from app.services.media_pipeline_service import MediaPipelineService
+from app.services.voice_sample_service import VoiceSampleService
 
 
 QUEUE_NAME = "media"
@@ -21,7 +25,14 @@ def run() -> None:
             with SessionLocal() as db:
                 job = JobRepository(db).get_next_queued_job(QUEUE_NAME)
                 if job:
-                    MediaPipelineService(db).process_job(job.id, WORKER_NAME)
+                    if job.job_type == JobType.AUDIO_MIX:
+                        AudioMixService(db).process_job(job.id, WORKER_NAME)
+                    elif job.job_type == JobType.VOICE_SAMPLE_EXTRACT:
+                        VoiceSampleService(db).process_job(job.id, WORKER_NAME)
+                    elif job.job_type == JobType.RENDER:
+                        RenderService(db).process_job(job.id, WORKER_NAME)
+                    else:
+                        MediaPipelineService(db).process_job(job.id, WORKER_NAME)
                     continue
         except Exception as exc:
             print(f"[worker-media] job processing error: {exc}", flush=True)

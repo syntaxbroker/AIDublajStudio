@@ -51,6 +51,28 @@ Henüz bilinçli olarak yapılmayanlar:
    - `admin@example.com / admin123`
    - `editor@example.com / editor123`
 
+## Health Endpointleri
+
+- API: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
+- DB: [http://localhost:8000/api/v1/health/db](http://localhost:8000/api/v1/health/db)
+- Redis: [http://localhost:8000/api/v1/health/redis](http://localhost:8000/api/v1/health/redis)
+
+## Fresh Clone Test
+
+Temiz bir ortamda hızlı doğrulama için:
+
+1. `git clone <repo-url>`
+2. `cd AIDublajStudio`
+3. `copy .env.example .env`
+4. `docker compose --profile app up -d --build`
+5. `powershell -ExecutionPolicy Bypass -File .\infra\scripts\run_sprint12_acceptance_tests.ps1`
+
+Beklenen sonuç:
+
+- web `http://localhost:3000`
+- api `http://localhost:8000/api/v1/health`
+- acceptance script sonunda `Sprint 12 acceptance tests passed.`
+
 ## Entegrasyon Testleri
 
 - Otomatik entegrasyon testi: [infra/scripts/run_sprint1_integration_tests.ps1](C:/xampp/htdocs/AIDublajStudio/infra/scripts/run_sprint1_integration_tests.ps1)
@@ -240,3 +262,277 @@ Bu script şunları yapar:
 - mock ASR, translation, diarization ve mock TTS ile zinciri çalıştırır
 - Sprint 10 integration testleri
 - completed TTS job restart kontrolü
+
+## Sprint 11 Acceptance
+
+- Final audio mix acceptance testi: [infra/scripts/run_sprint11_acceptance_tests.ps1](C:/xampp/htdocs/AIDublajStudio/infra/scripts/run_sprint11_acceptance_tests.ps1)
+
+Çalıştırma:
+
+1. `powershell -ExecutionPolicy Bypass -File .\infra\scripts\run_sprint11_acceptance_tests.ps1`
+
+Bu script şunları yapar:
+
+- `docker compose down -v`
+- `docker compose --profile app up -d --build`
+- mock zincir + TTS sonrası final dub audio mix akışını çalıştırır
+- Sprint 11 integration testleri
+- completed `AUDIO_MIX` job restart kontrolü
+
+## Sprint 12 Acceptance
+
+- Video render acceptance testi: [infra/scripts/run_sprint12_acceptance_tests.ps1](C:/xampp/htdocs/AIDublajStudio/infra/scripts/run_sprint12_acceptance_tests.ps1)
+
+Çalıştırma:
+
+1. `powershell -ExecutionPolicy Bypass -File .\infra\scripts\run_sprint12_acceptance_tests.ps1`
+
+Bu script şunları yapar:
+
+- `docker compose down -v`
+- `docker compose --profile app up -d --build`
+- mock zincir + final dub audio sonrası MP4 render akışını çalıştırır
+- Sprint 12 integration testleri
+- completed `RENDER` job restart kontrolü
+
+## Sprint 13 Web Kullanımı
+
+Sprint 13 ile birlikte project detail ekranına TTS, Audio Mix ve Render kontrol butonları eklendi. Final dub audio ve final MP4 artifact'leri UI üzerinden görülebilir, açılabilir ve indirilebilir.
+
+Çalıştırma:
+
+1. `docker compose --profile app up -d --build`
+2. Tarayıcıda `http://localhost:3000` açın
+3. `editor@example.com / editor123` ile giriş yapın
+4. Bir proje açın veya yeni proje oluşturun
+5. Sırasıyla `TTS Başlat`, `Audio Mix Başlat`, `Render Başlat` butonlarını kullanın
+6. `Final Dub Audio` ve `Final Render` panellerinden artifact'leri açın veya indirin
+
+Beklenen görünür sonuçlar:
+
+- project detail içinde TTS / AUDIO_MIX / RENDER job durumları
+- `FINAL_DUB_AUDIO` artifact görünümü
+- `FINAL_RENDER` artifact görünümü
+- `Play / Open` ve `Download` aksiyonları
+- failed job varsa hata mesajının ekranda görünmesi
+
+## Sprint 15 Smoke
+
+- Gerçek Edge TTS smoke testi: [infra/scripts/run_sprint15_edge_tts_smoke_test.ps1](C:/xampp/htdocs/AIDublajStudio/infra/scripts/run_sprint15_edge_tts_smoke_test.ps1)
+
+Çalıştırma:
+
+1. `powershell -ExecutionPolicy Bypass -File .\infra\scripts\run_sprint15_edge_tts_smoke_test.ps1`
+
+Bu script şunları yapar:
+
+- `docker compose down -v`
+- `docker compose --profile app up -d --build`
+- `TTS_PROVIDER=edge_tts` ile gerçek Türkçe ses üretir
+- aynı ses ile `AUDIO_MIX` ve `RENDER` zincirini doğrular
+- hatalı voice config ile provider failure senaryosunu doğrular
+
+Notlar:
+
+- Varsayılan gerçek provider `edge_tts`
+- Ses seçimi `EDGE_TTS_VOICE` veya `TTS_VOICE_NAME` ile değiştirilebilir
+- `piper` config/registry desteği eklidir, ancak gerçek implementasyonu bu sprintte tamamlanmadı
+
+## Sprint 16 Acceptance
+
+- Voice profile / voice library temel veri katmanı acceptance testi: [infra/scripts/run_sprint16_acceptance_tests.ps1](C:/xampp/htdocs/AIDublajStudio/infra/scripts/run_sprint16_acceptance_tests.ps1)
+
+Çalıştırma:
+
+1. `powershell -ExecutionPolicy Bypass -File .\infra\scripts\run_sprint16_acceptance_tests.ps1`
+
+Bu script şunları yapar:
+
+- `docker compose down -v`
+- `docker compose --profile app up -d --build`
+- default Türkçe `voice_profiles` bootstrap kontrolünü doğrular
+- `GET /voice-profiles` ve character voice assignment akışını test eder
+- mock TTS üzerinde assigned voice ve default fallback davranışını doğrular
+- completed `TTS` job restart kontrolünü yapar
+
+Yeni endpoint'ler:
+
+- `GET /api/v1/voice-profiles`
+- `POST /api/v1/voice-profiles`
+- `PATCH /api/v1/voice-profiles/{id}`
+- `POST /api/v1/projects/{project_id}/characters/{character_id}/voice-profile`
+
+## Sprint 17 Web Kullanımı
+
+Sprint 17 ile birlikte web arayüzünde voice profile yönetimi project detail ekranına taşındı.
+
+Kullanım:
+
+1. `docker compose --profile app up -d --build`
+2. Tarayıcıda `http://localhost:3000` açın
+3. `editor@example.com / editor123` ile giriş yapın
+4. Bir proje açın
+5. Gerekirse `Generate Characters` ile karakterleri üretin
+6. `Voice Profiles` panelinden mevcut Türkçe sesleri görün
+7. `Characters` panelinde bir karakter için `Voice Profile` seçin ve `Save Voice` ile kaydedin
+8. `TTS Başlat` ile yeni atamaya göre dub segmentlerini üretin
+9. `Dub Segments` tablosunda kullanılan `voice_id` değerini doğrulayın
+10. İsterseniz `Audio Mix Başlat` ve `Render Başlat` ile final zinciri tamamlayın
+
+Beklenen görünür sonuçlar:
+
+- karakter kartında `Assigned: ...` bilgisi görünür
+- sayfa yenileme sonrası voice profile ataması korunur
+- `Dub Segments` tablosunda seçilen veya fallback edilen `voice_id` görünür
+- `FINAL_DUB_AUDIO` ve `FINAL_RENDER` artifact’leri üretilebilir
+
+## Sprint 18 Acceptance
+
+- Voice cloning temel katmanı acceptance testi: [infra/scripts/run_sprint18_acceptance_tests.ps1](C:/xampp/htdocs/AIDublajStudio/infra/scripts/run_sprint18_acceptance_tests.ps1)
+
+Çalıştırma:
+
+1. `powershell -ExecutionPolicy Bypass -File .\infra\scripts\run_sprint18_acceptance_tests.ps1`
+
+Bu script şunları yapar:
+
+- `docker compose down -v`
+- `docker compose --profile app up -d --build`
+- mock ASR, translation, diarization, TTS ve mock voice clone ile zinciri çalıştırır
+- karakterden ses örneği çıkarır
+- `VOICE_SAMPLE_AUDIO` ve `VOICE_REFERENCE_AUDIO` artifact'lerini doğrular
+- cloned `voice_profile` oluşturur ve karaktere atar
+- cloned profile ile TTS, audio mix ve render zincirini doğrular
+- Sprint 18 integration testlerini çalıştırır
+
+## Sprint 18 Web Kullanımı
+
+Sprint 18 ile birlikte karakter kartlarında ses örneği ve klon profil akışı görünür hale geldi.
+
+Kullanım:
+
+1. `docker compose --profile app up -d --build`
+2. Tarayıcıda `http://localhost:3000` açın
+3. `editor@example.com / editor123` ile giriş yapın
+4. Bir proje açın ve gerekirse `Generate Characters` ile karakterleri üretin
+5. Karakter kartında `Ses Ornegi Cikar` butonuna basın
+6. Sample ve reference artifact bilgisinin karakter kartında göründüğünü doğrulayın
+7. `Klon Ses Profili Olustur` ile cloned profile oluşturun
+8. Gerekirse `Save Voice` ile farklı bir profile dönün veya cloned profile'ın seçili kaldığını doğrulayın
+9. `TTS Baslat`, `Audio Mix Baslat` ve `Render Baslat` ile zinciri tamamlayın
+10. `Dub Segments` tablosunda cloned karakter için provider / profile type bilgilerini kontrol edin
+
+## Sprint 19 CosyVoice Smoke
+
+- Gerçek voice cloning provider smoke testi: [infra/scripts/run_sprint19_cosyvoice_smoke_test.ps1](C:/xampp/htdocs/AIDublajStudio/infra/scripts/run_sprint19_cosyvoice_smoke_test.ps1)
+
+Çalıştırma öncesi iki yol vardır.
+
+### Yol 1: Kendi synth komutunuz
+
+Gerekli env:
+
+- `VOICE_CLONE_PROVIDER=cosyvoice`
+- `COSYVOICE_SERVICE_URL=http://cosyvoice-service:8010`
+- `COSYVOICE_SYNTH_COMMAND=...`
+
+Örnek:
+
+```powershell
+$env:VOICE_CLONE_PROVIDER = "cosyvoice"
+$env:COSYVOICE_SERVICE_URL = "http://cosyvoice-service:8010"
+$env:COSYVOICE_SYNTH_COMMAND = "python /workspace/services/cosyvoice/app/run_cosyvoice.py --repo-dir /opt/cosyvoice/CosyVoice --model-dir /models/CosyVoice-300M --device auto --text-file {text_file} --reference-audio {reference_audio} --output-audio {output_audio} --language-code {language_code} --voice-profile-id {voice_profile_id} --model-name {model_name} --reference-text-file {reference_text_file}"
+```
+
+### Yol 2: Dahili runner + hazır runtime
+
+Gerekli env:
+
+- `VOICE_CLONE_PROVIDER=cosyvoice`
+- `COSYVOICE_SERVICE_URL=http://cosyvoice-service:8010`
+- `COSYVOICE_REPO_DIR=/opt/cosyvoice/CosyVoice`
+- `COSYVOICE_MODEL_DIR=/models/CosyVoice-300M`
+
+Opsiyonel bootstrap env:
+
+- `COSYVOICE_BOOTSTRAP=1`
+- `COSYVOICE_REPO_URL=https://github.com/FunAudioLLM/CosyVoice.git`
+- `COSYVOICE_MODEL_ID=FunAudioLLM/CosyVoice-300M`
+- `COSYVOICE_DEVICE=auto`
+- `COSYVOICE_INSTALL_MODE=minimal`
+
+Örnek:
+
+```powershell
+$env:VOICE_CLONE_PROVIDER = "cosyvoice"
+$env:COSYVOICE_SERVICE_URL = "http://cosyvoice-service:8010"
+$env:COSYVOICE_BOOTSTRAP = "1"
+$env:COSYVOICE_REPO_URL = "https://github.com/FunAudioLLM/CosyVoice.git"
+$env:COSYVOICE_MODEL_ID = "FunAudioLLM/CosyVoice-300M"
+$env:COSYVOICE_REPO_DIR = "/opt/cosyvoice/CosyVoice"
+$env:COSYVOICE_MODEL_DIR = "/models/CosyVoice-300M"
+$env:COSYVOICE_DEVICE = "auto"
+$env:COSYVOICE_INSTALL_MODE = "minimal"
+```
+
+Notlar:
+
+- Sprint 19, API/worker tarafını gerçek bir CosyVoice HTTP servisine bağlar.
+- Repository içindeki `cosyvoice-service`, gerçek model komutunu `COSYVOICE_SYNTH_COMMAND` ile dışarıdan çalıştırabilen hafif bir köprüdür.
+- İsterseniz `COSYVOICE_BOOTSTRAP=1` ile service repo ve modeli kendi named volume’larına indirebilir.
+- `COSYVOICE_INSTALL_MODE=minimal` inference için gereken daha dar paket setini kurar; `repo` modu upstream `requirements.txt`’in tamamını yükler.
+- `COSYVOICE_DEVICE=auto` ise servis önce CUDA dener, yoksa CPU fallback kullanır.
+- `COSYVOICE_DEVICE=cuda` iken GPU görünmüyorsa servis açık hata verir.
+- Gerçek model/runtime bu repoda vendor edilmez; ancak service runner ve bootstrap yolu repoda hazırdır.
+
+Smoke komutu:
+
+1. `powershell -ExecutionPolicy Bypass -File .\infra\scripts\run_sprint19_cosyvoice_smoke_test.ps1`
+
+Bu script şunları doğrular:
+
+- cloned profile ile `cosyvoice` provider seçimi
+- `reference_audio_artifact_id` üzerinden gerçek clone synthesis çağrısı
+- `DubSegment.metadata_json` içinde `cloned`, `model_name`, `reference_audio_artifact_id`
+- `AUDIO_MIX` ve `RENDER` zincirinin bozulmaması
+- eksik reference ve çok kısa sample failure senaryoları
+
+## Demo Akışı
+
+Demo sırasında önerilen tam sıra:
+
+1. `docker compose --profile app up -d --build`
+2. Tarayıcıda `http://localhost:3000` açın
+3. `editor@example.com / editor123` ile login olun
+4. Yeni proje oluşturun
+5. Geçerli bir MP4 upload edin
+6. Project detail ekranında ingest, transcribe ve translate job'larının tamamlanmasını bekleyin
+7. `TTS Başlat`
+8. `Audio Mix Başlat`
+9. `Render Başlat`
+10. `Final Render` panelinde `Play / Open` veya `Download` kullanın
+11. Sayfayı yenileyip final artifact'lerin kalıcı kaldığını doğrulayın
+
+## Demo Checklist
+
+- [ ] `/health`, `/health/db`, `/health/redis` ayakta
+- [ ] Login başarılı
+- [ ] Proje oluşturuldu
+- [ ] Video upload edildi
+- [ ] Transcript oluştu
+- [ ] Translation oluştu
+- [ ] TTS tamamlandı
+- [ ] Final dub audio oluştu
+- [ ] Render tamamlandı
+- [ ] Final MP4 açıldı veya indirildi
+- [ ] Refresh sonrası proje durumu korundu
+- [ ] Yetkisiz artifact erişimi reddedildi
+
+## Hatalı Video Senaryosu
+
+Bozuk veya ffmpeg tarafından işlenemeyen bir video upload edilirse:
+
+- upload kabul edilse bile ilgili worker job `FAILED` olabilir
+- web arayüzünde failed job hata mesajı görünür
+- proje detay ekranı açılmaya devam eder
+- kullanıcı yeni bir geçerli video ile yeniden deneyebilir

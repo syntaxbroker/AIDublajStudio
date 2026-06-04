@@ -95,7 +95,9 @@ async def unhandled_error_handler(_: Request, exc: Exception) -> JSONResponse:
 
 @app.on_event("startup")
 def on_startup() -> None:
-    BootstrapService().ensure_default_users()
+    bootstrap = BootstrapService()
+    bootstrap.ensure_default_users()
+    bootstrap.ensure_default_voice_profiles()
 
 
 @app.on_event("shutdown")

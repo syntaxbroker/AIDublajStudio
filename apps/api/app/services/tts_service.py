@@ -19,6 +19,7 @@ from app.repositories.timeline_repository import TimelineRepository
 from app.services.event_service import EventService
 from app.services.job_service import JobService
 from app.services.storage_service import StorageService
+from app.services.voice_profile_service import VoiceProfileService
 
 
 class TTSService:
@@ -33,6 +34,7 @@ class TTSService:
         self.events = EventService(db)
         self.storage = StorageService()
         self.providers = ProviderRegistry()
+        self.voice_profiles = VoiceProfileService(db)
         self.settings = get_settings()
 
     def create_job_for_project(
@@ -81,8 +83,8 @@ class TTSService:
             )
 
             self._clear_existing_outputs(project.id)
-            provider = self.providers.get("TTS")
             created_segments: list[DubSegment] = []
+            resolved_provider_key = self.settings.tts_provider
 
             for clip in clips:
                 text = (clip.translation_text or clip.text or "").strip()
@@ -92,11 +94,20 @@ class TTSService:
                 if not parent_artifact:
                     raise AppError("TTS_PARENT_ARTIFACT_NOT_FOUND", "Timeline clip parent artifact not found", 404)
 
+                language_code = project.target_language or project.source_language or "tr"
+                voice_profile, voice_name, voice_selection_source = self._resolve_voice_selection(
+                    project_id=project.id,
+                    character_id=clip.character_id,
+                    language_code=language_code,
+                    provider_key=resolved_provider_key,
+                )
+
                 result = asyncio.run(
-                    provider.synthesize(
+                    self._synthesize_for_profile(
                         text=text,
-                        language_code=project.target_language or project.source_language or "tr",
-                        voice_name=self.settings.tts_voice_name,
+                        language_code=language_code,
+                        voice_name=voice_name,
+                        voice_profile=voice_profile,
                     )
                 )
 
@@ -113,13 +124,24 @@ class TTSService:
                     translation_segment_id=clip.translation_segment_id,
                     timeline_clip_id=clip.id,
                     character_id=clip.character_id,
+                    voice_profile_id=voice_profile.id if voice_profile else None,
                     text=text,
                     audio_artifact_id=artifact.id,
                     tts_artifact_id=artifact.id,
                     provider=result.get("provider", self.settings.tts_provider),
                     status=SegmentStatus.DRAFT,
                     duration_ms=result.get("duration_ms"),
-                    metadata_json=result.get("metadata_json", {}),
+                    metadata_json={
+                        **result.get("metadata_json", {}),
+                        "cloned": bool(voice_profile and voice_profile.profile_type == "cloned"),
+                        "reference_audio_artifact_id": (
+                            voice_profile.reference_audio_artifact_id if voice_profile and voice_profile.profile_type == "cloned" else None
+                        ),
+                        "voice_selection_source": voice_selection_source,
+                        "voice_profile_id": voice_profile.id if voice_profile else None,
+                        "voice_profile_display_name": voice_profile.display_name if voice_profile else None,
+                        "voice_profile_type": voice_profile.profile_type if voice_profile else "default",
+                    },
                 )
                 self.dubs.create(segment)
                 self.db.flush()
@@ -181,6 +203,89 @@ class TTSService:
                 self.job_service.transition(failed_job, JobState.FAILED, worker_name=worker_name, error_message=str(exc))
             self.db.commit()
             raise
+
+    def _resolve_voice_selection(
+        self,
+        *,
+        project_id: str,
+        character_id: str | None,
+        language_code: str,
+        provider_key: str,
+    ):
+        voice_profile, voice_name, source = self.voice_profiles.resolve_voice_for_character(
+            project_id=project_id,
+            character_id=character_id,
+            provider=provider_key,
+            language=language_code,
+        )
+        if voice_name:
+            return voice_profile, voice_name, source
+
+        if self.settings.tts_voice_name != "default":
+            return voice_profile, self.settings.tts_voice_name, "settings_voice_name"
+        if provider_key == "edge_tts":
+            return voice_profile, self.settings.edge_tts_voice, "settings_edge_voice"
+        return voice_profile, self.settings.tts_voice_name, "settings_default"
+
+    async def _synthesize_for_profile(
+        self,
+        *,
+        text: str,
+        language_code: str,
+        voice_name: str | None,
+        voice_profile,
+    ) -> dict:
+        if voice_profile and voice_profile.profile_type == "cloned":
+            if voice_profile.status != "ready":
+                raise AppError("VOICE_PROFILE_NOT_READY", "Cloned voice profile is not ready for TTS", 409)
+            if not voice_profile.reference_audio_artifact_id:
+                raise AppError("VOICE_REFERENCE_NOT_FOUND", "Cloned voice profile does not have reference audio", 409)
+            reference_artifact = self.artifacts.get_by_id(voice_profile.reference_audio_artifact_id)
+            if not reference_artifact:
+                raise AppError("VOICE_REFERENCE_NOT_FOUND", "Cloned voice reference artifact not found", 404)
+            reference_path = self.storage.absolute_path(reference_artifact.storage_path)
+            if not reference_path.exists():
+                raise AppError("VOICE_REFERENCE_FILE_NOT_FOUND", "Cloned voice reference file not found", 404)
+            reference_duration_ms = reference_artifact.duration_ms or voice_profile.sample_duration_ms or 0
+            if reference_duration_ms < self.settings.voice_clone_min_sample_duration_ms:
+                voice_profile.status = "failed"
+                voice_profile.updated_at = datetime.now(UTC)
+                raise AppError(
+                    "VOICE_REFERENCE_TOO_SHORT",
+                    f"Reference sample must be at least {self.settings.voice_clone_min_sample_duration_ms} ms",
+                    409,
+                )
+            clone_provider = self.providers.get("VOICE_CLONE", voice_profile.provider or None)
+            result = await clone_provider.synthesize(
+                text=text,
+                reference_audio_path=reference_path,
+                language_code=language_code,
+                voice_profile_id=voice_profile.id,
+                voice_name=voice_name,
+                reference_audio_artifact_id=voice_profile.reference_audio_artifact_id,
+                reference_text=(
+                    (reference_artifact.metadata_json or {}).get("prompt_text")
+                    or (voice_profile.metadata_json or {}).get("reference_text")
+                ),
+            )
+            metadata = dict(result.get("metadata_json", {}))
+            metadata["cloned"] = True
+            metadata["reference_audio_artifact_id"] = voice_profile.reference_audio_artifact_id
+            metadata["voice_profile_id"] = voice_profile.id
+            metadata["model_name"] = metadata.get("model_name") or voice_profile.provider or "voice_clone"
+            result["metadata_json"] = metadata
+            return result
+
+        provider = self.providers.get("TTS")
+        result = await provider.synthesize(
+            text=text,
+            language_code=language_code,
+            voice_name=voice_name,
+        )
+        metadata = dict(result.get("metadata_json", {}))
+        metadata.setdefault("cloned", False)
+        result["metadata_json"] = metadata
+        return result
 
     def _clear_existing_outputs(self, project_id: str) -> None:
         existing_segments = self.dubs.list_for_project(project_id)

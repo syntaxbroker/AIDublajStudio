@@ -57,9 +57,15 @@ services:
       OPENAI_TRANSLATION_MODEL: ${OPENAI_TRANSLATION_MODEL:-gpt-4.1-mini}
       TTS_PROVIDER: ${TTS_PROVIDER:-mock}
       TTS_VOICE_NAME: ${TTS_VOICE_NAME:-default}
+      VOICE_CLONE_PROVIDER: ${VOICE_CLONE_PROVIDER:-mock}
+      VOICE_CLONE_MIN_SAMPLE_DURATION_MS: ${VOICE_CLONE_MIN_SAMPLE_DURATION_MS:-500}
       EDGE_TTS_VOICE: ${EDGE_TTS_VOICE:-tr-TR-AhmetNeural}
       PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-}
       COSYVOICE_MODEL_PATH: ${COSYVOICE_MODEL_PATH:-}
+      COSYVOICE_SERVICE_URL: ${COSYVOICE_SERVICE_URL:-}
+      COSYVOICE_SERVICE_TIMEOUT_SECONDS: ${COSYVOICE_SERVICE_TIMEOUT_SECONDS:-180}
+      COSYVOICE_MODEL_NAME: ${COSYVOICE_MODEL_NAME:-CosyVoice}
+      F5TTS_MODEL_PATH: ${F5TTS_MODEL_PATH:-}
       DIARIZATION_PROVIDER: ${DIARIZATION_PROVIDER:-mock}
       PYANNOTE_AUTH_TOKEN: ${PYANNOTE_AUTH_TOKEN:-}
       PYANNOTE_PIPELINE_NAME: ${PYANNOTE_PIPELINE_NAME:-pyannote/speaker-diarization-3.1}
@@ -93,7 +99,7 @@ services:
     image: python:3.12-slim
     container_name: aidublaj-worker-gpu-0-dev
     working_dir: /workspace/workers/gpu
-    command: sh -c "pip install -r /workspace/apps/api/requirements/base.txt && python app/main.py"
+    command: sh -c "apt-get update && apt-get install -y ffmpeg && pip install -r /workspace/apps/api/requirements/base.txt && python app/main.py"
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aidublaj}:${POSTGRES_PASSWORD:-aidublaj}@postgres:5432/${POSTGRES_DB:-aidublaj}
       REDIS_URL: redis://redis:6379/0
@@ -115,9 +121,15 @@ services:
       OPENAI_TRANSLATION_MODEL: ${OPENAI_TRANSLATION_MODEL:-gpt-4.1-mini}
       TTS_PROVIDER: ${TTS_PROVIDER:-mock}
       TTS_VOICE_NAME: ${TTS_VOICE_NAME:-default}
+      VOICE_CLONE_PROVIDER: ${VOICE_CLONE_PROVIDER:-mock}
+      VOICE_CLONE_MIN_SAMPLE_DURATION_MS: ${VOICE_CLONE_MIN_SAMPLE_DURATION_MS:-500}
       EDGE_TTS_VOICE: ${EDGE_TTS_VOICE:-tr-TR-AhmetNeural}
       PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-}
       COSYVOICE_MODEL_PATH: ${COSYVOICE_MODEL_PATH:-}
+      COSYVOICE_SERVICE_URL: ${COSYVOICE_SERVICE_URL:-}
+      COSYVOICE_SERVICE_TIMEOUT_SECONDS: ${COSYVOICE_SERVICE_TIMEOUT_SECONDS:-180}
+      COSYVOICE_MODEL_NAME: ${COSYVOICE_MODEL_NAME:-CosyVoice}
+      F5TTS_MODEL_PATH: ${F5TTS_MODEL_PATH:-}
       DIARIZATION_PROVIDER: ${DIARIZATION_PROVIDER:-mock}
       PYANNOTE_AUTH_TOKEN: ${PYANNOTE_AUTH_TOKEN:-}
       PYANNOTE_PIPELINE_NAME: ${PYANNOTE_PIPELINE_NAME:-pyannote/speaker-diarization-3.1}
@@ -149,6 +161,37 @@ services:
       redis:
         condition: service_healthy
 
+  cosyvoice-service:
+    profiles: ["cosyvoice"]
+    build:
+      context: .
+      dockerfile: services/cosyvoice/Dockerfile
+    container_name: aidublaj-cosyvoice-service
+    working_dir: /workspace/services/cosyvoice
+    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8010 --reload"
+    environment:
+      COSYVOICE_MODEL_NAME: ${COSYVOICE_MODEL_NAME:-CosyVoice}
+      COSYVOICE_SYNTH_COMMAND: ${COSYVOICE_SYNTH_COMMAND:-}
+      COSYVOICE_BOOTSTRAP: ${COSYVOICE_BOOTSTRAP:-0}
+      COSYVOICE_REPO_URL: ${COSYVOICE_REPO_URL:-https://github.com/FunAudioLLM/CosyVoice.git}
+      COSYVOICE_REPO_DIR: ${COSYVOICE_REPO_DIR:-/opt/cosyvoice/CosyVoice}
+      COSYVOICE_MODEL_ID: ${COSYVOICE_MODEL_ID:-}
+      COSYVOICE_MODEL_DIR: ${COSYVOICE_MODEL_DIR:-/models/CosyVoice-300M}
+      COSYVOICE_DEVICE: ${COSYVOICE_DEVICE:-auto}
+      COSYVOICE_INSTALL_MODE: ${COSYVOICE_INSTALL_MODE:-minimal}
+      HF_HOME: /cache/huggingface
+    ports:
+      - "8010:8010"
+    gpus: all
+    volumes:
+      - ./:/workspace
+      - cosyvoice_runtime:/opt/cosyvoice
+      - cosyvoice_models:/models
+      - huggingface_cache:/cache/huggingface
+
 volumes:
   postgres_data:
   redis_data:
+  cosyvoice_runtime:
+  cosyvoice_models:
+  huggingface_cache:

@@ -15,7 +15,7 @@ class DubSegment(Base):
     translation_segment_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("translation_segments.id", ondelete="SET NULL"))
     project_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE"))
     project_version_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("project_versions.id", ondelete="SET NULL"))
-    voice_profile_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    voice_profile_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("voice_profiles.id", ondelete="SET NULL"))
     tts_artifact_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("artifacts.id", ondelete="SET NULL"))
     timeline_clip_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("timeline_clips.id", ondelete="SET NULL"))
     character_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("characters.id", ondelete="SET NULL"))

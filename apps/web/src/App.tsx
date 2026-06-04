@@ -4,21 +4,30 @@ import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-rou
 
 import {
   ApiError,
+  assignCharacterVoiceProfile,
+  createClonedVoiceProfileFromSample,
   createProject,
+  extractCharacterVoiceSample,
+  fetchArtifactBlob,
   generateCharactersFromSpeakers,
   getApiBaseUrl,
+  getArtifactContentUrl,
   getProject,
   getTimeline,
+  listVoiceProfiles,
   listProjects,
   login,
   me,
   renameCharacter,
   sortCharacters,
+  startAudioMix,
+  startRender,
+  startTts,
   updateTimelineClip,
   uploadProjectVideo,
 } from "./lib/api";
 import { clearStoredToken, getStoredToken, setStoredToken } from "./lib/storage";
-import type { ProjectDetail, ProjectListItem, TimelineResponse, User } from "./types";
+import type { ProjectDetail, ProjectListItem, TimelineResponse, User, VoiceProfile } from "./types";
 
 type AuthState = {
   token: string | null;
@@ -49,6 +58,40 @@ function formatMs(value: number): string {
 
 function jobIsActive(state: string): boolean {
   return state === "PENDING" || state === "QUEUED" || state === "PROCESSING";
+}
+
+function getApiRootUrl(): string {
+  const base = getApiBaseUrl();
+  return base.endsWith("/api/v1") ? base.slice(0, -"/api/v1".length) : base;
+}
+
+function getNextStepMessage(detail: ProjectDetail): string {
+  const hasSourceVideo = detail.artifacts.some((artifact) => artifact.artifact_type === "SOURCE_VIDEO");
+  const hasTimeline = detail.timeline_clips.length > 0;
+  const hasDubSegments = detail.dub_segments.length > 0;
+  const hasFinalDubAudio = detail.artifacts.some((artifact) => artifact.artifact_type === "FINAL_DUB_AUDIO");
+  const hasFinalRender = detail.artifacts.some((artifact) => artifact.artifact_type === "FINAL_RENDER");
+  const activeJob = detail.jobs.find((job) => jobIsActive(job.state));
+
+  if (!hasSourceVideo) {
+    return "Sıradaki adım: video upload edin.";
+  }
+  if (activeJob) {
+    return `Sistem şu anda ${activeJob.job_type} çalıştırıyor. İş bitene kadar otomatik yenileme aktif.`;
+  }
+  if (!hasTimeline) {
+    return "Sıradaki adım: transcript ve timeline oluşmasını bekleyin.";
+  }
+  if (!hasDubSegments) {
+    return "Sıradaki adım: TTS Başlat ile Türkçe ses segmentlerini üretin.";
+  }
+  if (!hasFinalDubAudio) {
+    return "Sıradaki adım: Audio Mix Başlat ile tek Türkçe dub audio dosyası üretin.";
+  }
+  if (!hasFinalRender) {
+    return "Sıradaki adım: Render Başlat ile final MP4 üretin.";
+  }
+  return "Final render hazır. MP4 dosyasını açabilir veya indirebilirsiniz.";
 }
 
 function extractMessage(error: unknown): string {
@@ -140,12 +183,18 @@ function ProtectedRoute({ auth, children }: { auth: AuthState; children: ReactEl
 }
 
 function AppHeader({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) {
+  const apiRootUrl = getApiRootUrl();
   return (
     <header className="app-header">
       <div>
         <p className="eyebrow">AI Dublaj Studio</p>
         <h1>Pipeline Control Room</h1>
         <p className="muted">API: {getApiBaseUrl()}</p>
+        <div className="health-links">
+          <a className="inline-link" href={`${apiRootUrl}/api/v1/health`} target="_blank" rel="noreferrer">/health</a>
+          <a className="inline-link" href={`${apiRootUrl}/api/v1/health/db`} target="_blank" rel="noreferrer">/health/db</a>
+          <a className="inline-link" href={`${apiRootUrl}/api/v1/health/redis`} target="_blank" rel="noreferrer">/health/redis</a>
+        </div>
       </div>
       <div className="header-actions">
         <div className="user-badge">
@@ -365,8 +414,15 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [characterActionLoading, setCharacterActionLoading] = useState(false);
+  const [pipelineAction, setPipelineAction] = useState<"tts" | "audio-mix" | "render" | null>(null);
   const [timelineSavingId, setTimelineSavingId] = useState<string | null>(null);
+  const [finalRenderPreviewUrl, setFinalRenderPreviewUrl] = useState<string | null>(null);
+  const [artifactActionError, setArtifactActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [voiceProfiles, setVoiceProfiles] = useState<VoiceProfile[]>([]);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, { display_name: string; description: string }>>({});
+  const [voiceProfileDrafts, setVoiceProfileDrafts] = useState<Record<string, string>>({});
   const [timelineDrafts, setTimelineDrafts] = useState<Record<string, TimelineDraft>>({});
 
   const token = auth.token;
@@ -381,6 +437,12 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
             description: character.description ?? "",
           },
         ]),
+      ),
+    );
+
+    setVoiceProfileDrafts(
+      Object.fromEntries(
+        project.characters.map((character) => [character.id, character.assigned_voice_profile_id ?? ""]),
       ),
     );
 
@@ -412,13 +474,16 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     setError(null);
 
     try {
-      const [project, timelinePayload] = await Promise.all([
+      const [project, timelinePayload, availableVoiceProfiles] = await Promise.all([
         getProject(token, projectId),
         getTimeline(token, projectId),
+        listVoiceProfiles(token),
       ]);
       setDetail(project);
       setTimeline(timelinePayload);
+      setVoiceProfiles(availableVoiceProfiles);
       syncDrafts(project, timelinePayload);
+      setLastRefreshedAt(new Date().toISOString());
     } catch (err) {
       setError(extractMessage(err));
     } finally {
@@ -445,6 +510,14 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     return () => window.clearInterval(intervalId);
   }, [detail, token, projectId]);
 
+  useEffect(() => {
+    return () => {
+      if (finalRenderPreviewUrl) {
+        URL.revokeObjectURL(finalRenderPreviewUrl);
+      }
+    };
+  }, [finalRenderPreviewUrl]);
+
   const handleUpload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!token || !projectId) return;
@@ -456,9 +529,12 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     }
     setUploading(true);
     setError(null);
+    setArtifactActionError(null);
+    setNotice(null);
     try {
       const project = await uploadProjectVideo(token, projectId, file);
       setDetail(project);
+      setNotice("Upload tamamlandı. Sistem şimdi ingest, transcript ve translation adımlarını otomatik çalıştırıyor.");
       await refreshDetail();
       event.currentTarget.reset();
     } catch (err) {
@@ -472,6 +548,8 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     if (!token || !projectId) return;
     setCharacterActionLoading(true);
     setError(null);
+    setArtifactActionError(null);
+    setNotice(null);
     try {
       const project = await generateCharactersFromSpeakers(token, projectId);
       setDetail(project);
@@ -489,6 +567,8 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     if (!draft) return;
     setCharacterActionLoading(true);
     setError(null);
+    setArtifactActionError(null);
+    setNotice(null);
     try {
       const project = await renameCharacter(token, projectId, characterId, {
         display_name: draft.display_name,
@@ -503,12 +583,73 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     }
   };
 
+  const handleAssignVoiceProfile = async (characterId: string) => {
+    if (!token || !projectId) return;
+    const voiceProfileId = voiceProfileDrafts[characterId];
+    if (!voiceProfileId) {
+      setError("Bir voice profile seçin.");
+      return;
+    }
+    setCharacterActionLoading(true);
+    setError(null);
+    setArtifactActionError(null);
+    setNotice(null);
+    try {
+      const project = await assignCharacterVoiceProfile(token, projectId, characterId, voiceProfileId);
+      setDetail(project);
+      setNotice("Voice profile atandı. TTS yeniden çalıştırıldığında bu seçim kullanılacak.");
+      await refreshDetail();
+    } catch (err) {
+      setError(extractMessage(err));
+    } finally {
+      setCharacterActionLoading(false);
+    }
+  };
+
+  const handleExtractVoiceSample = async (characterId: string) => {
+    if (!token || !projectId) return;
+    setCharacterActionLoading(true);
+    setError(null);
+    setArtifactActionError(null);
+    setNotice(null);
+    try {
+      const project = await extractCharacterVoiceSample(token, projectId, characterId);
+      setDetail(project);
+      setNotice("Ses örneği çıkarma işi kuyruğa alındı. Media worker tamamlayınca sample artifact görünecek.");
+      await refreshDetail();
+    } catch (err) {
+      setError(extractMessage(err));
+    } finally {
+      setCharacterActionLoading(false);
+    }
+  };
+
+  const handleCreateClonedProfile = async (characterId: string) => {
+    if (!token || !projectId) return;
+    setCharacterActionLoading(true);
+    setError(null);
+    setArtifactActionError(null);
+    setNotice(null);
+    try {
+      const project = await createClonedVoiceProfileFromSample(token, projectId, characterId);
+      setDetail(project);
+      setNotice("Klon ses profili oluşturuldu ve karaktere atandı.");
+      await refreshDetail();
+    } catch (err) {
+      setError(extractMessage(err));
+    } finally {
+      setCharacterActionLoading(false);
+    }
+  };
+
   const handleSaveClip = async (clipId: string) => {
     if (!token || !projectId) return;
     const draft = timelineDrafts[clipId];
     if (!draft) return;
     setTimelineSavingId(clipId);
     setError(null);
+    setArtifactActionError(null);
+    setNotice(null);
     try {
       const timelinePayload = await updateTimelineClip(token, projectId, clipId, {
         text: draft.text,
@@ -538,6 +679,71 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     }
   };
 
+  const runPipelineAction = async (action: "tts" | "audio-mix" | "render") => {
+    if (!token || !projectId) return;
+    setPipelineAction(action);
+    setError(null);
+    setArtifactActionError(null);
+    setNotice(null);
+    try {
+      let project: ProjectDetail;
+      if (action === "tts") {
+        project = await startTts(token, projectId);
+      } else if (action === "audio-mix") {
+        project = await startAudioMix(token, projectId);
+      } else {
+        project = await startRender(token, projectId);
+      }
+      setDetail(project);
+      if (action === "tts") {
+        setNotice("TTS başlatıldı. Segment sesleri üretiliyor.");
+      } else if (action === "audio-mix") {
+        setNotice("Audio mix başlatıldı. Tek Türkçe dub audio hazırlanıyor.");
+      } else {
+        setNotice("Render başlatıldı. Final MP4 hazırlanıyor.");
+      }
+      await refreshDetail();
+    } catch (err) {
+      setError(extractMessage(err));
+    } finally {
+      setPipelineAction(null);
+    }
+  };
+
+  const handleOpenArtifact = async (artifactId: string) => {
+    if (!token || !projectId) return;
+    setArtifactActionError(null);
+    try {
+      const blob = await fetchArtifactBlob(token, projectId, artifactId);
+      if (finalRenderPreviewUrl) {
+        URL.revokeObjectURL(finalRenderPreviewUrl);
+      }
+      const url = URL.createObjectURL(blob);
+      setFinalRenderPreviewUrl(url);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setArtifactActionError(extractMessage(err));
+    }
+  };
+
+  const handleDownloadArtifact = async (artifactId: string, fileName: string) => {
+    if (!token || !projectId) return;
+    setArtifactActionError(null);
+    try {
+      const blob = await fetchArtifactBlob(token, projectId, artifactId);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setArtifactActionError(extractMessage(err));
+    }
+  };
+
   if (!projectId) {
     return <Navigate to="/projects" replace />;
   }
@@ -564,6 +770,24 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
   }
 
   const characters = sortCharacters(detail.characters);
+  const turkishVoiceProfiles = voiceProfiles.filter((profile) => profile.language === "tr");
+  const getLatestSampleArtifactForCharacter = (characterId: string) =>
+    detail.artifacts.find(
+      (artifact) =>
+        artifact.artifact_type === "VOICE_SAMPLE_AUDIO" &&
+        String(artifact.metadata_json?.character_id ?? "") === characterId,
+    );
+  const getLatestReferenceArtifactForCharacter = (characterId: string) =>
+    detail.artifacts.find(
+      (artifact) =>
+        artifact.artifact_type === "VOICE_REFERENCE_AUDIO" &&
+        String(artifact.metadata_json?.character_id ?? "") === characterId,
+    );
+  const finalDubAudioArtifacts = detail.artifacts.filter((artifact) => artifact.artifact_type === "FINAL_DUB_AUDIO");
+  const finalRenderArtifacts = detail.artifacts.filter((artifact) => artifact.artifact_type === "FINAL_RENDER");
+  const activeJob = detail.jobs.find((job) => jobIsActive(job.state));
+  const failedJobs = detail.jobs.filter((job) => job.state === "FAILED");
+  const nextStepMessage = getNextStepMessage(detail);
 
   return (
     <div className="page-shell">
@@ -585,15 +809,61 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
       </div>
 
       {error ? <div className="error-box">{error}</div> : null}
+      {artifactActionError ? <div className="error-box">{artifactActionError}</div> : null}
+      {notice ? <div className="info-box">{notice}</div> : null}
 
       <div className="grid summary-grid">
         <StatCard label="Artifacts" value={detail.artifacts.length} />
         <StatCard label="Jobs" value={detail.jobs.length} />
         <StatCard label="Transcript" value={detail.transcript_segments.length} />
         <StatCard label="Translation" value={detail.translation_segments.length} />
+        <StatCard label="Dub Segments" value={detail.dub_segments.length} />
         <StatCard label="Speakers" value={detail.speaker_segments.length} />
         <StatCard label="Timeline Clips" value={timeline.clips.length} />
       </div>
+
+      <section className="panel">
+        <h3>Pipeline Actions</h3>
+        <div className="action-grid">
+          <button
+            className="primary-button"
+            onClick={() => void runPipelineAction("tts")}
+            disabled={pipelineAction !== null}
+          >
+            {pipelineAction === "tts" ? "TTS Çalışıyor..." : "TTS Başlat"}
+          </button>
+          <button
+            className="primary-button"
+            onClick={() => void runPipelineAction("audio-mix")}
+            disabled={pipelineAction !== null}
+          >
+            {pipelineAction === "audio-mix" ? "Audio Mix Çalışıyor..." : "Audio Mix Başlat"}
+          </button>
+          <button
+            className="primary-button"
+            onClick={() => void runPipelineAction("render")}
+            disabled={pipelineAction !== null}
+          >
+            {pipelineAction === "render" ? "Render Çalışıyor..." : "Render Başlat"}
+          </button>
+        </div>
+        <div className="stack status-stack">
+          <p className="muted">
+            Polling: {activeJob ? "aktif, her 4 saniyede bir yenileniyor" : "beklemede"} ·
+            {" "}Son yenileme: {lastRefreshedAt ? formatDate(lastRefreshedAt) : "-"}
+          </p>
+          <p className="muted">Aktif job: {activeJob ? `${activeJob.job_type} · ${activeJob.state}` : "Yok"}</p>
+          <div className="next-step-box">
+            <strong>Sıradaki adım</strong>
+            <p>{nextStepMessage}</p>
+          </div>
+          {failedJobs.map((job) => (
+            <div className="error-box" key={job.id}>
+              {job.job_type} hata: {String(job.error_json?.message ?? "Bilinmeyen hata")}
+            </div>
+          ))}
+        </div>
+      </section>
 
       <div className="grid two-columns">
         <section className="panel">
@@ -662,6 +932,52 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
       </section>
 
       <div className="grid two-columns">
+        <section className="panel">
+          <h3>Final Dub Audio</h3>
+          {!finalDubAudioArtifacts.length ? <p className="muted">Henüz FINAL_DUB_AUDIO yok.</p> : null}
+          <div className="stack">
+            {finalDubAudioArtifacts.map((artifact) => (
+              <div className="subpanel" key={artifact.id}>
+                <strong>{artifact.file_name}</strong>
+                <p className="muted mono-cell">{artifact.storage_path}</p>
+                <div className="row-actions">
+                  <span className="muted">Parents: {artifact.parent_artifact_ids.length}</span>
+                  <div className="row-button-group">
+                    <button className="ghost-button" onClick={() => void handleOpenArtifact(artifact.id)}>Open</button>
+                    <button className="ghost-button" onClick={() => void handleDownloadArtifact(artifact.id, artifact.file_name)}>Download</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="panel">
+          <h3>Final Render</h3>
+          {!finalRenderArtifacts.length ? <p className="muted">Henüz FINAL_RENDER yok.</p> : null}
+          <div className="stack">
+            {finalRenderArtifacts.map((artifact) => (
+              <div className="subpanel" key={artifact.id}>
+                <strong>{artifact.file_name}</strong>
+                <p className="muted mono-cell">{artifact.storage_path}</p>
+                <div className="row-actions">
+                  <span className="muted">
+                    {String(artifact.metadata_json?.format?.format_name ?? "mp4")} · {String(artifact.metadata_json?.streams?.length ?? 0)} stream
+                  </span>
+                  <div className="row-button-group">
+                    <button className="ghost-button" onClick={() => void handleOpenArtifact(artifact.id)}>Play / Open</button>
+                    <button className="ghost-button" onClick={() => void handleDownloadArtifact(artifact.id, artifact.file_name)}>Download</button>
+                  </div>
+                </div>
+                {finalRenderPreviewUrl ? (
+                  <video className="preview-video" controls src={finalRenderPreviewUrl} />
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid two-columns">
         <SegmentPanel
           title="Transcript Segments"
           rows={detail.transcript_segments.map((segment) => ({
@@ -693,11 +1009,34 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
           }))}
         />
         <section className="panel">
+          <h3>Voice Profiles</h3>
+          {!turkishVoiceProfiles.length ? <p className="muted">Henüz voice profile yok.</p> : null}
+          <div className="stack">
+            {turkishVoiceProfiles.map((profile) => (
+              <div className="subpanel" key={profile.id}>
+                <strong>{profile.display_name}</strong>
+                <p>{profile.description || "Açıklama yok"}</p>
+                <span className="muted">
+                  {profile.provider} · {profile.voice_id} · {profile.profile_type} · {profile.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid two-columns">
+        <section className="panel">
           <h3>Characters</h3>
           {!characters.length ? <p className="muted">Henüz character yok. Generate Characters ile oluşturun.</p> : null}
           <div className="stack">
             {characters.map((character) => (
               <div className="subpanel" key={character.id}>
+                {(() => {
+                  const sampleArtifact = getLatestSampleArtifactForCharacter(character.id);
+                  const referenceArtifact = getLatestReferenceArtifactForCharacter(character.id);
+                  return (
+                    <>
                 <div className="inline-fields">
                   <label>
                     <span>Ad</span>
@@ -730,21 +1069,115 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
                     />
                   </label>
                 </div>
-                <div className="row-actions">
-                  <span className="muted">{character.source_type}</span>
-                  <button
-                    className="ghost-button"
-                    onClick={() => void handleRenameCharacter(character.id)}
-                    disabled={characterActionLoading}
-                  >
-                    Rename
-                  </button>
+                <div className="inline-fields">
+                  <label>
+                    <span>Voice Profile</span>
+                    <select
+                      value={voiceProfileDrafts[character.id] ?? character.assigned_voice_profile_id ?? ""}
+                      onChange={(event) =>
+                        setVoiceProfileDrafts((current) => ({
+                          ...current,
+                          [character.id]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Fallback default</option>
+                      {turkishVoiceProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.display_name} · {profile.voice_id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
+                <div className="stack compact-stack">
+                  <span className="muted">
+                    Sample: {sampleArtifact ? sampleArtifact.file_name : "Henüz yok"}
+                  </span>
+                  <span className="muted">
+                    Reference: {referenceArtifact ? referenceArtifact.file_name : "Henüz yok"}
+                  </span>
+                </div>
+                <div className="row-actions">
+                  <div className="stack compact-stack">
+                    <span className="muted">{character.source_type}</span>
+                    <span className="muted">
+                      Assigned: {character.assigned_voice_profile?.display_name ?? "Default fallback"}
+                    </span>
+                    <span className="muted">
+                      Profile Type: {character.assigned_voice_profile?.profile_type ?? "default"}
+                    </span>
+                  </div>
+                  <div className="row-button-group">
+                    <button
+                      className="ghost-button"
+                      onClick={() => void handleExtractVoiceSample(character.id)}
+                      disabled={characterActionLoading}
+                    >
+                      Ses Ornegi Cikar
+                    </button>
+                    <button
+                      className="ghost-button"
+                      onClick={() => void handleCreateClonedProfile(character.id)}
+                      disabled={characterActionLoading || !referenceArtifact}
+                    >
+                      Klon Ses Profili Olustur
+                    </button>
+                    <button
+                      className="ghost-button"
+                      onClick={() => void handleRenameCharacter(character.id)}
+                      disabled={characterActionLoading}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      className="ghost-button"
+                      onClick={() => void handleAssignVoiceProfile(character.id)}
+                      disabled={characterActionLoading || !(voiceProfileDrafts[character.id] ?? "")}
+                    >
+                      Save Voice
+                    </button>
+                  </div>
+                </div>
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>
         </section>
       </div>
+
+      <section className="panel">
+        <h3>Dub Segments</h3>
+        {!detail.dub_segments.length ? <p className="muted">Henüz dub segment yok.</p> : null}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Timeline Clip</th>
+                <th>Voice</th>
+                <th>Profile Type</th>
+                <th>Provider</th>
+                <th>Duration</th>
+                <th>Artifact</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.dub_segments.map((segment) => (
+                <tr key={segment.id}>
+                  <td className="mono-cell">{segment.timeline_clip_id ?? "-"}</td>
+                  <td>{String(segment.metadata_json?.voice_name ?? segment.metadata_json?.voice_profile_display_name ?? "-")}</td>
+                  <td>{String(segment.metadata_json?.voice_profile_type ?? "-")}</td>
+                  <td>{segment.provider ?? "-"}</td>
+                  <td>{segment.duration_ms ?? "-"} ms</td>
+                  <td className="mono-cell">{segment.audio_artifact_id ?? "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="panel">
         <h3>Timeline Clips</h3>

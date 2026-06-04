@@ -17,5 +17,6 @@ class JobResponse(BaseModel):
     gpu_device_id: int | None
     input_json: dict
     output_json: dict
+    error_json: dict | None
     created_at: datetime
     updated_at: datetime

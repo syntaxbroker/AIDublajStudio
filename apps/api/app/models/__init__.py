@@ -10,6 +10,7 @@ from app.models.timeline_clip import TimelineClip
 from app.models.translation_segment import TranslationSegment
 from app.models.transcript_segment import TranscriptSegment
 from app.models.user import User
+from app.models.voice_profile import CharacterVoiceAssignment, VoiceProfile
 
 __all__ = [
     "Artifact",
@@ -30,4 +31,6 @@ __all__ = [
     "TranslationSegment",
     "TranscriptSegment",
     "User",
+    "VoiceProfile",
+    "CharacterVoiceAssignment",
 ]

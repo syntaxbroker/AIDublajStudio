@@ -22,6 +22,8 @@ class StorageService:
             "thumbnails",
             "proxies",
             "audio",
+            "voice_samples",
+            "voice_references",
             "transcripts",
             "translations",
             "tts",

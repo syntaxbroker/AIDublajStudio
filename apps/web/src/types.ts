@@ -51,6 +51,7 @@ export type Job = {
   gpu_device_id: number | null;
   input_json: Record<string, unknown>;
   output_json: Record<string, unknown>;
+  error_json: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };
@@ -116,6 +117,8 @@ export type Character = {
   display_name: string;
   description: string | null;
   source_type: string;
+  assigned_voice_profile_id: string | null;
+  assigned_voice_profile: VoiceProfile | null;
   created_at: string;
   updated_at: string;
 };
@@ -138,6 +141,7 @@ export type TimelineClip = {
   project_id: string;
   transcript_segment_id: string | null;
   translation_segment_id: string | null;
+  dub_segment_id: string | null;
   artifact_id: string | null;
   character_id: string | null;
   edited_by_user_id: string | null;
@@ -157,6 +161,44 @@ export type TimelineClip = {
   updated_at: string;
 };
 
+export type DubSegment = {
+  id: string;
+  project_id: string;
+  translation_segment_id: string | null;
+  timeline_clip_id: string | null;
+  character_id: string | null;
+  voice_profile_id: string | null;
+  text: string | null;
+  audio_artifact_id: string | null;
+  provider: string | null;
+  status: string;
+  duration_ms: number | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type VoiceProfile = {
+  id: string;
+  display_name: string;
+  description: string | null;
+  provider: string;
+  voice_id: string;
+  profile_type: string;
+  language: string;
+  gender: string | null;
+  reference_audio_artifact_id: string | null;
+  source_character_id: string | null;
+  source_speaker_label: string | null;
+  sample_duration_ms: number | null;
+  quality_score: number | null;
+  is_shared: boolean;
+  status: string;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ProjectDetail = ProjectListItem & {
   artifacts: Artifact[];
   jobs: Job[];
@@ -166,6 +208,7 @@ export type ProjectDetail = ProjectListItem & {
   transcript_segments: TranscriptSegment[];
   speaker_segments: SpeakerSegment[];
   translation_segments: TranslationSegment[];
+  dub_segments: DubSegment[];
   timeline_clips: TimelineClip[];
 };
 

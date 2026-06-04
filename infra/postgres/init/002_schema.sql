@@ -10,6 +10,8 @@ CREATE TYPE job_type AS ENUM (
   'DIARIZE',
   'TRANSLATE',
   'TTS',
+  'VOICE_SAMPLE_EXTRACT',
+  'AUDIO_MIX',
   'LIPSYNC',
   'RENDER'
 );
@@ -25,6 +27,9 @@ CREATE TYPE artifact_type AS ENUM (
   'TRANSCRIPT',
   'TRANSLATION',
   'TTS_AUDIO',
+  'VOICE_SAMPLE_AUDIO',
+  'VOICE_REFERENCE_AUDIO',
+  'FINAL_DUB_AUDIO',
   'LIPSYNC_VIDEO',
   'FINAL_RENDER',
   'THUMBNAIL_IMAGE',
@@ -65,11 +70,19 @@ CREATE TYPE event_type AS ENUM (
   'DUB_SEGMENT_CREATED',
   'TTS_AUDIO_GENERATED',
   'TTS_COMPLETED',
+  'AUDIO_MIX_STARTED',
+  'AUDIO_SEGMENT_PLACED',
+  'AUDIO_MIX_COMPLETED',
+  'RENDER_COMPLETED',
   'TRANSCRIPT_GENERATED',
   'TRANSCRIPT_EDITED',
   'TRANSLATION_GENERATED',
   'TRANSLATION_MODIFIED',
   'VOICE_PROFILE_ASSIGNED',
+  'VOICE_SAMPLE_EXTRACTION_STARTED',
+  'VOICE_SAMPLE_AUDIO_CREATED',
+  'VOICE_PROFILE_CREATED_FROM_SAMPLE',
+  'VOICE_PROFILE_ASSIGNED_TO_CHARACTER',
   'TTS_GENERATED',
   'RENDER_STARTED',
   'RENDER_FINISHED',
@@ -264,15 +277,24 @@ CREATE TABLE character_profiles (
 
 CREATE TABLE voice_profiles (
   id uuid PRIMARY KEY,
-  character_profile_id uuid REFERENCES character_profiles(id) ON DELETE SET NULL,
   display_name varchar(255) NOT NULL,
-  source_artifact_id uuid REFERENCES artifacts(id) ON DELETE SET NULL,
-  duration_seconds numeric(10,3) NOT NULL DEFAULT 0,
+  description text,
+  provider varchar(64) NOT NULL,
+  voice_id varchar(255) NOT NULL,
+  profile_type varchar(32) NOT NULL DEFAULT 'edge_tts',
+  language varchar(16) NOT NULL DEFAULT 'tr',
+  gender varchar(32),
+  reference_audio_artifact_id uuid REFERENCES artifacts(id) ON DELETE SET NULL,
+  source_character_id uuid,
+  source_speaker_label varchar(64),
+  sample_duration_ms integer,
   quality_score numeric(5,2),
-  is_library_eligible boolean NOT NULL DEFAULT false,
-  notes text,
+  is_shared boolean NOT NULL DEFAULT true,
+  status varchar(32) NOT NULL DEFAULT 'ready',
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (provider, voice_id)
 );
 
 CREATE TABLE embeddings (
@@ -433,6 +455,23 @@ CREATE INDEX character_assignments_project_id_idx ON character_assignments(proje
 CREATE UNIQUE INDEX character_assignments_speaker_unique_idx
   ON character_assignments(project_id, character_id, speaker_label)
   WHERE speaker_label IS NOT NULL AND transcript_segment_id IS NULL AND timeline_clip_id IS NULL;
+
+CREATE TABLE character_voice_assignments (
+  id uuid PRIMARY KEY,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  character_id uuid NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+  voice_profile_id uuid NOT NULL REFERENCES voice_profiles(id) ON DELETE CASCADE,
+  assignment_source varchar(32) NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (project_id, character_id)
+);
+
+CREATE INDEX character_voice_assignments_project_id_idx ON character_voice_assignments(project_id);
+
+ALTER TABLE voice_profiles
+  ADD CONSTRAINT voice_profiles_source_character_id_fkey
+  FOREIGN KEY (source_character_id) REFERENCES characters(id) ON DELETE SET NULL;
 
 CREATE TABLE project_settings (
   id uuid PRIMARY KEY,

@@ -1,11 +1,13 @@
 import type {
   ApiErrorResponse,
   Character,
+  DubSegment,
   ProjectDetail,
   ProjectListItem,
   TimelineResponse,
   TokenResponse,
   User,
+  VoiceProfile,
 } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -137,6 +139,54 @@ export function renameCharacter(
   );
 }
 
+export function listVoiceProfiles(token: string): Promise<VoiceProfile[]> {
+  return request<VoiceProfile[]>("/voice-profiles", {}, token);
+}
+
+export function assignCharacterVoiceProfile(
+  token: string,
+  projectId: string,
+  characterId: string,
+  voiceProfileId: string,
+): Promise<ProjectDetail> {
+  return request<ProjectDetail>(
+    `/projects/${projectId}/characters/${characterId}/voice-profile`,
+    {
+      method: "POST",
+      body: JSON.stringify({ voice_profile_id: voiceProfileId }),
+    },
+    token,
+  );
+}
+
+export function extractCharacterVoiceSample(
+  token: string,
+  projectId: string,
+  characterId: string,
+): Promise<ProjectDetail> {
+  return request<ProjectDetail>(
+    `/projects/${projectId}/characters/${characterId}/voice-sample`,
+    {
+      method: "POST",
+    },
+    token,
+  );
+}
+
+export function createClonedVoiceProfileFromSample(
+  token: string,
+  projectId: string,
+  characterId: string,
+): Promise<ProjectDetail> {
+  return request<ProjectDetail>(
+    `/projects/${projectId}/characters/${characterId}/voice-profile/from-sample`,
+    {
+      method: "POST",
+    },
+    token,
+  );
+}
+
 export function updateTimelineClip(
   token: string,
   projectId: string,
@@ -158,6 +208,66 @@ export function updateTimelineClip(
     },
     token,
   );
+}
+
+export function startTts(token: string, projectId: string): Promise<ProjectDetail> {
+  return request<ProjectDetail>(
+    `/projects/${projectId}/tts`,
+    {
+      method: "POST",
+    },
+    token,
+  );
+}
+
+export function startAudioMix(token: string, projectId: string): Promise<ProjectDetail> {
+  return request<ProjectDetail>(
+    `/projects/${projectId}/audio-mix`,
+    {
+      method: "POST",
+    },
+    token,
+  );
+}
+
+export function startRender(token: string, projectId: string): Promise<ProjectDetail> {
+  return request<ProjectDetail>(
+    `/projects/${projectId}/render`,
+    {
+      method: "POST",
+    },
+    token,
+  );
+}
+
+export function getArtifactContentUrl(projectId: string, artifactId: string): string {
+  return `${API_BASE_URL}/projects/${projectId}/artifacts/${artifactId}/content`;
+}
+
+export async function fetchArtifactBlob(token: string, projectId: string, artifactId: string): Promise<Blob> {
+  const response = await fetch(getArtifactContentUrl(projectId, artifactId), {
+    headers: {
+      Accept: "*/*",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    let errorMessage = `Request failed with status ${response.status}`;
+    let errorCode = "HTTP_ERROR";
+    try {
+      const payload = (await response.json()) as ApiErrorResponse;
+      if (payload.error) {
+        errorMessage = payload.error.message;
+        errorCode = payload.error.code;
+      }
+    } catch {
+      errorMessage = await response.text();
+    }
+    throw new ApiError(errorMessage, errorCode, response.status);
+  }
+
+  return response.blob();
 }
 
 export function sortCharacters(characters: Character[]): Character[] {

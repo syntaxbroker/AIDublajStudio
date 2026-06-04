@@ -7,6 +7,10 @@ from app.providers.lipsync.mock import MockLipSyncProvider
 from app.providers.tts.cosyvoice_provider import CosyVoiceTTSProvider
 from app.providers.tts.edge_tts_provider import EdgeTTSProvider
 from app.providers.tts.mock import MockTTSProvider
+from app.providers.tts.piper_provider import PiperTTSProvider
+from app.providers.voice_clone.cosyvoice_provider import CosyVoiceProvider
+from app.providers.voice_clone.f5tts_provider import F5TTSProvider
+from app.providers.voice_clone.mock import MockVoiceCloneProvider
 from app.providers.translation.mock import MockTranslationProvider
 from app.providers.translation.ollama import OllamaTranslationProvider
 from app.providers.translation.openai_provider import OpenAITranslationProvider
@@ -26,7 +30,13 @@ class ProviderRegistry:
             "TTS": {
                 "mock": MockTTSProvider,
                 "edge_tts": EdgeTTSProvider,
+                "piper": PiperTTSProvider,
                 "cosyvoice": CosyVoiceTTSProvider,
+            },
+            "VOICE_CLONE": {
+                "mock": MockVoiceCloneProvider,
+                "cosyvoice": CosyVoiceProvider,
+                "f5tts": F5TTSProvider,
             },
             "LIP_SYNC": {"mock": MockLipSyncProvider},
         }
@@ -48,4 +58,6 @@ class ProviderRegistry:
             return self.settings.translation_provider
         if capability == "TTS":
             return self.settings.tts_provider
+        if capability == "VOICE_CLONE":
+            return self.settings.voice_clone_provider
         return "mock"

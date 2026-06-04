@@ -94,6 +94,17 @@ textarea {
   align-items: center;
 }
 
+.action-grid,
+.row-button-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.status-stack {
+  margin-top: 14px;
+}
+
 .grid {
   display: grid;
   gap: 20px;
@@ -111,6 +122,10 @@ textarea {
 .stack {
   display: grid;
   gap: 12px;
+}
+
+.compact-stack {
+  gap: 4px;
 }
 
 .list {
@@ -150,6 +165,13 @@ textarea {
   font-size: 12px;
   color: #9d6b1d;
   margin: 0 0 8px;
+}
+
+.health-links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
 }
 
 h1,
@@ -224,6 +246,27 @@ select {
   background: rgba(203, 73, 45, 0.12);
   color: #8a2a1d;
   padding: 12px 14px;
+}
+
+.info-box,
+.next-step-box {
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.info-box {
+  background: rgba(30, 120, 200, 0.12);
+  color: #17598f;
+}
+
+.next-step-box {
+  background: rgba(255, 219, 128, 0.2);
+  color: #6b4a0d;
+}
+
+.next-step-box p,
+.next-step-box strong {
+  margin: 0;
 }
 
 .user-badge {
@@ -316,6 +359,13 @@ th {
   color: #6c6155;
 }
 
+.preview-video {
+  width: 100%;
+  margin-top: 12px;
+  border-radius: 16px;
+  background: #000;
+}
+
 @media (max-width: 900px) {
   .app-header,
   .toolbar,
@@ -329,9 +379,16 @@ th {
     width: 100%;
   }
 
+  .action-grid,
+  .row-button-group {
+    width: 100%;
+  }
+
   .header-actions .ghost-button,
   .toolbar-actions .ghost-button,
-  .toolbar-actions .primary-button {
+  .toolbar-actions .primary-button,
+  .action-grid .primary-button,
+  .row-button-group .ghost-button {
     width: 100%;
   }
 }

@@ -8,12 +8,17 @@ from app.db.session import get_db
 from app.schemas.character import CharacterRenameRequest
 from app.schemas.project import ProjectCreateRequest, ProjectDetailResponse, ProjectListItem
 from app.schemas.timeline import TimelineClipMergeRequest, TimelineClipSplitRequest, TimelineClipUpdateRequest, TimelineResponse
+from app.schemas.voice_profile import CharacterVoiceAssignmentRequest
 from app.services.character_service import CharacterService
 from app.services.diarization_service import DiarizationService
 from app.services.project_service import ProjectService
+from app.services.audio_mix_service import AudioMixService
 from app.services.timeline_service import TimelineService
+from app.services.render_service import RenderService
 from app.services.tts_service import TTSService
 from app.services.translation_service import TranslationService
+from app.services.voice_sample_service import VoiceSampleService
+from app.services.voice_profile_service import VoiceProfileService
 
 
 router = APIRouter()
@@ -68,6 +73,32 @@ def tts_project(
     return service.get_detail(project_id, current_user.id)
 
 
+@router.post("/{project_id}/audio-mix", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
+def audio_mix_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProjectDetailResponse:
+    service = ProjectService(db)
+    if not service.projects.user_has_access(project_id, current_user.id):
+        raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+    AudioMixService(db).create_job_for_project(project_id, current_user.id)
+    return service.get_detail(project_id, current_user.id)
+
+
+@router.post("/{project_id}/render", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
+def render_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProjectDetailResponse:
+    service = ProjectService(db)
+    if not service.projects.user_has_access(project_id, current_user.id):
+        raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+    RenderService(db).create_job_for_project(project_id, current_user.id)
+    return service.get_detail(project_id, current_user.id)
+
+
 @router.post("/{project_id}/diarize", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
 def diarize_project(
     project_id: str,
@@ -119,6 +150,61 @@ def rename_character(
     if not service.projects.user_has_access(project_id, current_user.id):
         raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
     CharacterService(db).rename_character(project_id, character_id, payload, current_user.id)
+    return service.get_detail(project_id, current_user.id)
+
+
+@router.post(
+    "/{project_id}/characters/{character_id}/voice-profile",
+    response_model=ProjectDetailResponse,
+    responses=COMMON_ERROR_RESPONSES,
+)
+def assign_voice_profile_to_character(
+    project_id: str,
+    character_id: str,
+    payload: CharacterVoiceAssignmentRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProjectDetailResponse:
+    service = ProjectService(db)
+    if not service.projects.user_has_access(project_id, current_user.id):
+        raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+    VoiceProfileService(db).assign_to_character(project_id, character_id, payload, current_user.id)
+    return service.get_detail(project_id, current_user.id)
+
+
+@router.post(
+    "/{project_id}/characters/{character_id}/voice-sample",
+    response_model=ProjectDetailResponse,
+    responses=COMMON_ERROR_RESPONSES,
+)
+def extract_character_voice_sample(
+    project_id: str,
+    character_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProjectDetailResponse:
+    service = ProjectService(db)
+    if not service.projects.user_has_access(project_id, current_user.id):
+        raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+    VoiceSampleService(db).create_job_for_character(project_id, character_id, current_user.id)
+    return service.get_detail(project_id, current_user.id)
+
+
+@router.post(
+    "/{project_id}/characters/{character_id}/voice-profile/from-sample",
+    response_model=ProjectDetailResponse,
+    responses=COMMON_ERROR_RESPONSES,
+)
+def create_voice_profile_from_sample(
+    project_id: str,
+    character_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProjectDetailResponse:
+    service = ProjectService(db)
+    if not service.projects.user_has_access(project_id, current_user.id):
+        raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+    VoiceProfileService(db).create_profile_from_sample(project_id, character_id, current_user.id)
     return service.get_detail(project_id, current_user.id)
 
 

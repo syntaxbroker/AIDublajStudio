@@ -34,6 +34,7 @@ class Project(Base):
     timeline_clips = relationship("TimelineClip", back_populates="project", order_by="TimelineClip.start_ms.asc()")
     characters = relationship("Character", back_populates="project", order_by="Character.created_at.asc()")
     character_assignments = relationship("CharacterAssignment", back_populates="project", order_by="CharacterAssignment.created_at.asc()")
+    character_voice_assignments = relationship("CharacterVoiceAssignment", order_by="CharacterVoiceAssignment.created_at.asc()")
 
 
 class ProjectMember(Base):

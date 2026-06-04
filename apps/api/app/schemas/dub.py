@@ -13,6 +13,7 @@ class DubSegmentResponse(BaseModel):
     translation_segment_id: str | None
     timeline_clip_id: str | None
     character_id: str | None
+    voice_profile_id: str | None
     text: str | None
     audio_artifact_id: str | None
     provider: str | None

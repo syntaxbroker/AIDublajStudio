@@ -12,6 +12,7 @@ from app.repositories.project_repository import ProjectRepository
 from app.repositories.speaker_repository import SpeakerRepository
 from app.repositories.translation_repository import TranslationRepository
 from app.repositories.transcript_repository import TranscriptRepository
+from app.repositories.voice_profile_repository import VoiceProfileRepository
 from app.schemas.artifact import ArtifactResponse
 from app.schemas.character import CharacterAssignmentResponse, CharacterResponse
 from app.schemas.dub import DubSegmentResponse
@@ -21,6 +22,7 @@ from app.schemas.timeline import TimelineClipResponse
 from app.schemas.project import ProjectCreateRequest, ProjectDetailResponse, ProjectListItem, ProjectEventResponse
 from app.schemas.translation import TranslationSegmentResponse
 from app.schemas.transcript import TranscriptSegmentResponse
+from app.schemas.voice_profile import VoiceProfileResponse
 from app.services.event_service import EventService
 
 
@@ -35,6 +37,7 @@ class ProjectService:
         self.transcripts = TranscriptRepository(db)
         self.speakers = SpeakerRepository(db)
         self.translations = TranslationRepository(db)
+        self.voice_profiles = VoiceProfileRepository(db)
         self.event_service = EventService(db)
 
     def list_for_user(self, user_id: str) -> list[ProjectListItem]:
@@ -85,6 +88,24 @@ class ProjectService:
         for link in links:
             parent_map.setdefault(str(link.child_artifact_id), []).append(str(link.parent_artifact_id))
 
+        voice_assignments = {item.character_id: item for item in self.voice_profiles.list_assignments_for_project(project_id)}
+        character_responses: list[CharacterResponse] = []
+        for item in project.characters:
+            assignment = voice_assignments.get(item.id)
+            character_responses.append(
+                CharacterResponse(
+                    **CharacterResponse.model_validate(item).model_dump(
+                        exclude={"assigned_voice_profile_id", "assigned_voice_profile"}
+                    ),
+                    assigned_voice_profile_id=assignment.voice_profile_id if assignment else None,
+                    assigned_voice_profile=(
+                        VoiceProfileResponse.model_validate(assignment.voice_profile)
+                        if assignment and assignment.voice_profile
+                        else None
+                    ),
+                )
+            )
+
         return ProjectDetailResponse(
             **ProjectListItem.model_validate(project).model_dump(),
             artifacts=[
@@ -96,7 +117,7 @@ class ProjectService:
             ],
             jobs=[JobResponse.model_validate(item) for item in project.jobs],
             events=[ProjectEventResponse.model_validate(item) for item in project.events],
-            characters=[CharacterResponse.model_validate(item) for item in project.characters],
+            characters=character_responses,
             character_assignments=[CharacterAssignmentResponse.model_validate(item) for item in project.character_assignments],
             transcript_segments=[TranscriptSegmentResponse.model_validate(item) for item in project.transcript_segments],
             speaker_segments=[SpeakerSegmentResponse.model_validate(item) for item in project.speaker_segments],

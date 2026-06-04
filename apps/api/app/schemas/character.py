@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.voice_profile import VoiceProfileResponse
+
 
 class CharacterResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -11,6 +13,8 @@ class CharacterResponse(BaseModel):
     display_name: str
     description: str | None
     source_type: str
+    assigned_voice_profile_id: str | None = None
+    assigned_voice_profile: VoiceProfileResponse | None = None
     created_at: datetime
     updated_at: datetime
 

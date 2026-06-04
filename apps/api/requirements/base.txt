@@ -12,3 +12,4 @@ pytest==8.3.5
 httpx==0.28.1
 requests==2.32.5
 faster-whisper==1.1.1
+edge-tts==7.2.3

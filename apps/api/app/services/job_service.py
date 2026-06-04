@@ -108,6 +108,60 @@ class JobService:
         self.transition(job, JobState.QUEUED, worker_name="scheduler")
         return job
 
+    def create_voice_sample_extract_job(
+        self,
+        project_id: str,
+        requested_by_user_id: str,
+        character_id: str,
+        parent_job_id: str | None = None,
+    ) -> Job:
+        job = Job(
+            id=str(uuid7()),
+            project_id=project_id,
+            parent_job_id=parent_job_id,
+            job_type=JobType.VOICE_SAMPLE_EXTRACT,
+            state=JobState.PENDING,
+            queue_name="media",
+            requested_by_user_id=requested_by_user_id,
+            input_json={"character_id": character_id},
+        )
+        self.jobs.create(job)
+        self._record_attempt(job, None, JobState.PENDING, "Job created")
+        self.transition(job, JobState.QUEUED, worker_name="scheduler")
+        return job
+
+    def create_audio_mix_job(self, project_id: str, requested_by_user_id: str, parent_job_id: str | None = None) -> Job:
+        job = Job(
+            id=str(uuid7()),
+            project_id=project_id,
+            parent_job_id=parent_job_id,
+            job_type=JobType.AUDIO_MIX,
+            state=JobState.PENDING,
+            queue_name="media",
+            requested_by_user_id=requested_by_user_id,
+            input_json={},
+        )
+        self.jobs.create(job)
+        self._record_attempt(job, None, JobState.PENDING, "Job created")
+        self.transition(job, JobState.QUEUED, worker_name="scheduler")
+        return job
+
+    def create_render_job(self, project_id: str, requested_by_user_id: str, parent_job_id: str | None = None) -> Job:
+        job = Job(
+            id=str(uuid7()),
+            project_id=project_id,
+            parent_job_id=parent_job_id,
+            job_type=JobType.RENDER,
+            state=JobState.PENDING,
+            queue_name="media",
+            requested_by_user_id=requested_by_user_id,
+            input_json={},
+        )
+        self.jobs.create(job)
+        self._record_attempt(job, None, JobState.PENDING, "Job created")
+        self.transition(job, JobState.QUEUED, worker_name="scheduler")
+        return job
+
     def transition(self, job: Job, next_state: JobState, worker_name: str | None = None, error_message: str | None = None) -> Job:
         allowed = VALID_TRANSITIONS.get(job.state, set())
         if next_state not in allowed:
