@@ -99,7 +99,13 @@ class RenderService:
                 frame_rate=self._frame_rate(metadata),
                 audio_channels=self._audio_channels(metadata),
                 sample_rate=self._sample_rate(metadata),
-                metadata_json=metadata,
+                metadata_json={
+                    **metadata,
+                    "source_video_artifact_id": video_source.id,
+                    "source_video_artifact_type": video_source.artifact_type.value,
+                    "source_video_label": self._video_source_label(video_source),
+                    "audio_artifact_id": final_dub_audio.id,
+                },
             )
             self.artifacts.create(artifact)
             self.db.flush()
@@ -118,6 +124,8 @@ class RenderService:
                 **(job.output_json or {}),
                 "final_render_artifact_id": artifact.id,
                 "video_source_artifact_id": video_source.id,
+                "video_source_artifact_type": video_source.artifact_type.value,
+                "video_source_label": self._video_source_label(video_source),
                 "audio_artifact_id": final_dub_audio.id,
             }
             job.updated_at = datetime.now(UTC)
@@ -151,6 +159,9 @@ class RenderService:
 
     def _resolve_video_source(self, project_id: str) -> Artifact:
         artifacts = self.artifacts.list_for_project(project_id)
+        lipsync_video = next((item for item in artifacts if item.artifact_type == ArtifactType.LIPSYNC_VIDEO), None)
+        if lipsync_video:
+            return lipsync_video
         source_video = next((item for item in artifacts if item.artifact_type == ArtifactType.SOURCE_VIDEO), None)
         if source_video:
             return source_video
@@ -158,6 +169,15 @@ class RenderService:
         if proxy_video:
             return proxy_video
         raise AppError("RENDER_VIDEO_SOURCE_NOT_FOUND", "Render video source not found", 404)
+
+    def _video_source_label(self, artifact: Artifact) -> str:
+        if artifact.artifact_type == ArtifactType.LIPSYNC_VIDEO:
+            return "Lip Sync Video"
+        if artifact.artifact_type == ArtifactType.SOURCE_VIDEO:
+            return "Source Video"
+        if artifact.artifact_type == ArtifactType.PROXY_VIDEO:
+            return "Proxy Video"
+        return artifact.artifact_type.value
 
     def _delete_existing_final_render(self, project_id: str) -> None:
         existing = [

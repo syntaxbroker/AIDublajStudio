@@ -785,6 +785,25 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     );
   const finalDubAudioArtifacts = detail.artifacts.filter((artifact) => artifact.artifact_type === "FINAL_DUB_AUDIO");
   const finalRenderArtifacts = detail.artifacts.filter((artifact) => artifact.artifact_type === "FINAL_RENDER");
+  const getRenderSourceLabel = (artifact: { metadata_json?: Record<string, unknown> }) => {
+    const label = String(artifact.metadata_json?.source_video_label ?? "");
+    if (label) {
+      return label;
+    }
+    const artifactType = String(artifact.metadata_json?.source_video_artifact_type ?? "");
+    if (artifactType === "LIPSYNC_VIDEO") {
+      return "Lip Sync Video";
+    }
+    if (artifactType === "SOURCE_VIDEO") {
+      return "Source Video";
+    }
+    if (artifactType === "PROXY_VIDEO") {
+      return "Proxy Video";
+    }
+    return "Not recorded";
+  };
+  const getRenderSourceArtifactId = (artifact: { metadata_json?: Record<string, unknown> }) =>
+    String(artifact.metadata_json?.source_video_artifact_id ?? "");
   const activeJob = detail.jobs.find((job) => jobIsActive(job.state));
   const failedJobs = detail.jobs.filter((job) => job.state === "FAILED");
   const nextStepMessage = getNextStepMessage(detail);
@@ -940,6 +959,10 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
               <div className="subpanel" key={artifact.id}>
                 <strong>{artifact.file_name}</strong>
                 <p className="muted mono-cell">{artifact.storage_path}</p>
+                <p className="muted">
+                  Source: {getRenderSourceLabel(artifact)}
+                  {getRenderSourceArtifactId(artifact) ? ` · ${getRenderSourceArtifactId(artifact)}` : ""}
+                </p>
                 <div className="row-actions">
                   <span className="muted">Parents: {artifact.parent_artifact_ids.length}</span>
                   <div className="row-button-group">

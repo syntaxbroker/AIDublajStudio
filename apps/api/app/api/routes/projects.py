@@ -11,6 +11,7 @@ from app.schemas.timeline import TimelineClipMergeRequest, TimelineClipSplitRequ
 from app.schemas.voice_profile import CharacterVoiceAssignmentRequest
 from app.services.character_service import CharacterService
 from app.services.diarization_service import DiarizationService
+from app.services.lip_sync_service import LipSyncService
 from app.services.project_service import ProjectService
 from app.services.audio_mix_service import AudioMixService
 from app.services.timeline_service import TimelineService
@@ -96,6 +97,19 @@ def render_project(
     if not service.projects.user_has_access(project_id, current_user.id):
         raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
     RenderService(db).create_job_for_project(project_id, current_user.id)
+    return service.get_detail(project_id, current_user.id)
+
+
+@router.post("/{project_id}/lip-sync", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
+def lip_sync_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProjectDetailResponse:
+    service = ProjectService(db)
+    if not service.projects.user_has_access(project_id, current_user.id):
+        raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+    LipSyncService(db).create_job_for_project(project_id, current_user.id)
     return service.get_detail(project_id, current_user.id)
 
 

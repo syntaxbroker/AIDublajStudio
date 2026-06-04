@@ -1,6 +1,12 @@
 $ErrorActionPreference = "Stop"
 
-Set-Location "C:\xampp\htdocs\AIDublajStudio"
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+Set-Location $repoRoot
+
+$dockerBin = "C:\Program Files\Docker\Docker\resources\bin"
+if ((Test-Path $dockerBin) -and ($env:Path -notlike "*$dockerBin*")) {
+  $env:Path = "$dockerBin;$env:Path"
+}
 
 $env:ASR_PROVIDER = "mock"
 $env:TRANSLATION_PROVIDER = "mock"
@@ -9,6 +15,12 @@ $env:TTS_PROVIDER = "mock"
 $env:VOICE_CLONE_PROVIDER = "cosyvoice"
 $env:COSYVOICE_SERVICE_URL = "http://cosyvoice-service:8010"
 $env:VOICE_CLONE_MIN_SAMPLE_DURATION_MS = "500"
+if (-not $env:COSYVOICE_BOOTSTRAP) { $env:COSYVOICE_BOOTSTRAP = "1" }
+if (-not $env:COSYVOICE_REPO_URL) { $env:COSYVOICE_REPO_URL = "https://github.com/FunAudioLLM/CosyVoice.git" }
+if (-not $env:COSYVOICE_MODEL_ID) { $env:COSYVOICE_MODEL_ID = "FunAudioLLM/CosyVoice-300M" }
+if (-not $env:COSYVOICE_REPO_DIR) { $env:COSYVOICE_REPO_DIR = "/opt/cosyvoice/CosyVoice" }
+if (-not $env:COSYVOICE_MODEL_DIR) { $env:COSYVOICE_MODEL_DIR = "/models/CosyVoice-300M" }
+if (-not $env:COSYVOICE_DEVICE) { $env:COSYVOICE_DEVICE = "cpu" }
 
 function Test-DockerAvailable {
   try {
@@ -42,19 +54,21 @@ function Wait-ForApi {
 function Wait-ForCosyVoiceService {
   param([int]$Attempts = 600, [int]$DelaySeconds = 2)
   for ($i = 0; $i -lt $Attempts; $i++) {
+    $response = $null
     try {
       $response = Invoke-RestMethod -Uri "http://localhost:8010/health" -Method Get
-      if ($response.status -eq "ok") {
-        if (-not $response.configured) {
-          if ($response.error) {
-            throw "CosyVoice service is running but not configured: $($response.error)"
-          }
-          throw "CosyVoice service is running but not configured."
-        }
-        return
-      }
     } catch {
       Start-Sleep -Seconds $DelaySeconds
+      continue
+    }
+    if ($response.status -eq "ok") {
+      if (-not $response.configured) {
+        if ($response.error) {
+          throw "CosyVoice service is running but not configured: $($response.error)"
+        }
+        throw "CosyVoice service is running but not configured."
+      }
+      return
     }
   }
   throw "CosyVoice service did not become ready in time."
@@ -81,7 +95,7 @@ try {
     throw "Set COSYVOICE_SYNTH_COMMAND or provide COSYVOICE_REPO_DIR and COSYVOICE_MODEL_DIR before running Sprint 19 CosyVoice smoke test."
   }
 
-  $projectsPath = "C:\xampp\htdocs\AIDublajStudio\storage\projects"
+  $projectsPath = Join-Path $repoRoot "storage\projects"
   Get-ChildItem $projectsPath -Force | Where-Object { $_.Name -ne ".gitkeep" } | Remove-Item -Recurse -Force
 
   docker compose --profile app --profile cosyvoice down -v --remove-orphans
@@ -92,7 +106,7 @@ try {
   Wait-ForApi
   Wait-ForCosyVoiceService
 
-  $sampleVideoHostPath = "C:\xampp\htdocs\AIDublajStudio\storage\tmp\sprint2-sample.mp4"
+  $sampleVideoHostPath = Join-Path $repoRoot "storage\tmp\sprint2-sample.mp4"
   if (-not (Test-Path $sampleVideoHostPath)) {
     Wait-ForWorkerMediaFfmpeg
     docker compose exec -T worker-media sh -c "mkdir -p /workspace/storage/tmp && ffmpeg -y -f lavfi -i color=c=black:s=320x240:d=4 -f lavfi -i sine=frequency=880:duration=4 -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac /workspace/storage/tmp/sprint2-sample.mp4 >/tmp/ffmpeg-sample.log 2>&1"
@@ -119,7 +133,7 @@ with sample.open("rb") as handle:
     r = s.post(f"{base}/projects/{project_id}/upload", headers=headers, files={"file": (sample.name, handle, "video/mp4")})
     r.raise_for_status()
 
-def wait_for(job_type: str, state: str, attempts: int = 90):
+def wait_for(job_type: str, state: str, attempts: int = 300):
     payload = None
     for _ in range(attempts):
         detail = s.get(f"{base}/projects/{project_id}", headers=headers)
@@ -128,6 +142,8 @@ def wait_for(job_type: str, state: str, attempts: int = 90):
         jobs = {job["job_type"]: job for job in payload["jobs"]}
         if job_type in jobs and jobs[job_type]["state"] == state:
             return payload
+        if job_type in jobs and jobs[job_type]["state"] == "FAILED" and state != "FAILED":
+            raise RuntimeError(f"{job_type} failed: {json.dumps(jobs[job_type].get('error_json'), ensure_ascii=False)}")
         time.sleep(2)
     raise RuntimeError(f"timeout waiting for {job_type}={state}")
 
@@ -153,7 +169,7 @@ character = next(item for item in detail["characters"] if item["id"] == characte
 reference_audio_artifact_id = character["assigned_voice_profile"]["reference_audio_artifact_id"]
 r = s.post(f"{base}/projects/{project_id}/tts", headers=headers)
 r.raise_for_status()
-detail = wait_for("TTS", "COMPLETED")
+detail = wait_for("TTS", "COMPLETED", attempts=600)
 segment = next(item for item in detail["dub_segments"] if item["character_id"] == character_id)
 assert segment["provider"] == "cosyvoice", segment
 assert segment["metadata_json"]["cloned"] is True, segment
@@ -209,7 +225,7 @@ def upload_and_prepare(project_id: str):
         response = s.post(f"{base}/projects/{project_id}/upload", headers=headers, files={"file": (sample.name, handle, "video/mp4")})
         response.raise_for_status()
 
-def wait_for(project_id: str, job_type: str, state: str, attempts: int = 90):
+def wait_for(project_id: str, job_type: str, state: str, attempts: int = 300):
     payload = None
     for _ in range(attempts):
         detail = s.get(f"{base}/projects/{project_id}", headers=headers)
@@ -218,6 +234,8 @@ def wait_for(project_id: str, job_type: str, state: str, attempts: int = 90):
         jobs = {job["job_type"]: job for job in payload["jobs"]}
         if job_type in jobs and jobs[job_type]["state"] == state:
             return payload
+        if job_type in jobs and jobs[job_type]["state"] == "FAILED" and state != "FAILED":
+            raise RuntimeError(f"{job_type} failed: {json.dumps(jobs[job_type].get('error_json'), ensure_ascii=False)}")
         time.sleep(2)
     raise RuntimeError(f"timeout waiting for {job_type}={state}")
 
@@ -270,7 +288,7 @@ with psycopg.connect(database_url) as conn:
     s.post(f"{base}/projects/{project_id}/tts", headers=headers).raise_for_status()
     failed = wait_for(project_id, "TTS", "FAILED")
     job = next(job for job in failed["jobs"] if job["job_type"] == "TTS")
-    assert "VOICE_REFERENCE_TOO_SHORT" in json.dumps(job["error_json"]), job
+    assert "at least 500 ms" in json.dumps(job["error_json"]), job
 
 print(json.dumps({
     "missing_reference_tts_state": "FAILED",

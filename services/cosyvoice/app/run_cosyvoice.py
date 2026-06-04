@@ -55,6 +55,8 @@ def main() -> int:
     if not reference_audio.exists():
         raise RuntimeError(f"reference audio not found: {reference_audio}")
 
+    runner_dir = Path(__file__).resolve().parent
+    sys.path = [item for item in sys.path if Path(item or ".").resolve() != runner_dir]
     sys.path.insert(0, str(repo_dir))
     matcha_dir = repo_dir / "third_party" / "Matcha-TTS"
     if matcha_dir.exists():
@@ -96,7 +98,13 @@ def main() -> int:
         raise RuntimeError("CosyVoice did not return any audio segments")
 
     output_audio.parent.mkdir(parents=True, exist_ok=True)
-    torchaudio.save(str(output_audio), first_result["tts_speech"], cosyvoice.sample_rate)
+    torchaudio.save(
+        str(output_audio),
+        first_result["tts_speech"],
+        cosyvoice.sample_rate,
+        encoding="PCM_S",
+        bits_per_sample=16,
+    )
 
     metadata_path = output_audio.with_suffix(".json")
     metadata_path.write_text(

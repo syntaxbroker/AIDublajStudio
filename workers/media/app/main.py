@@ -4,6 +4,7 @@ import time
 from app.db.session import SessionLocal
 from app.core.enums import JobType
 from app.repositories.job_repository import JobRepository
+from app.services.lip_sync_service import LipSyncService
 from app.services.render_service import RenderService
 from app.services.audio_mix_service import AudioMixService
 from app.services.job_service import JobService
@@ -27,6 +28,8 @@ def run() -> None:
                 if job:
                     if job.job_type == JobType.AUDIO_MIX:
                         AudioMixService(db).process_job(job.id, WORKER_NAME)
+                    elif job.job_type == JobType.LIP_SYNC:
+                        LipSyncService(db).process_job(job.id, WORKER_NAME)
                     elif job.job_type == JobType.VOICE_SAMPLE_EXTRACT:
                         VoiceSampleService(db).process_job(job.id, WORKER_NAME)
                     elif job.job_type == JobType.RENDER:

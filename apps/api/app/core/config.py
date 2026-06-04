@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     tts_voice_name: str = "default"
     voice_clone_provider: str = "mock"
     voice_clone_min_sample_duration_ms: int = 500
+    lip_sync_provider: str = "mock"
     ollama_base_url: str = "http://localhost:11434"
     ollama_translation_model: str = "qwen2.5:7b"
     openai_api_key: str | None = None
@@ -43,6 +44,9 @@ class Settings(BaseSettings):
     cosyvoice_service_url: str | None = None
     cosyvoice_service_timeout_seconds: int = 180
     cosyvoice_model_name: str = "CosyVoice"
+    musetalk_service_url: str | None = None
+    musetalk_service_timeout_seconds: int = 1800
+    musetalk_model_name: str = "MuseTalk"
     f5tts_model_path: str | None = None
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

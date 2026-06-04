@@ -58,7 +58,11 @@ services:
       TTS_PROVIDER: ${TTS_PROVIDER:-mock}
       TTS_VOICE_NAME: ${TTS_VOICE_NAME:-default}
       VOICE_CLONE_PROVIDER: ${VOICE_CLONE_PROVIDER:-mock}
+      LIP_SYNC_PROVIDER: ${LIP_SYNC_PROVIDER:-mock}
       VOICE_CLONE_MIN_SAMPLE_DURATION_MS: ${VOICE_CLONE_MIN_SAMPLE_DURATION_MS:-500}
+      MUSETALK_SERVICE_URL: ${MUSETALK_SERVICE_URL:-}
+      MUSETALK_SERVICE_TIMEOUT_SECONDS: ${MUSETALK_SERVICE_TIMEOUT_SECONDS:-1800}
+      MUSETALK_MODEL_NAME: ${MUSETALK_MODEL_NAME:-MuseTalk}
       EDGE_TTS_VOICE: ${EDGE_TTS_VOICE:-tr-TR-AhmetNeural}
       PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-}
       COSYVOICE_MODEL_PATH: ${COSYVOICE_MODEL_PATH:-}
@@ -122,7 +126,11 @@ services:
       TTS_PROVIDER: ${TTS_PROVIDER:-mock}
       TTS_VOICE_NAME: ${TTS_VOICE_NAME:-default}
       VOICE_CLONE_PROVIDER: ${VOICE_CLONE_PROVIDER:-mock}
+      LIP_SYNC_PROVIDER: ${LIP_SYNC_PROVIDER:-mock}
       VOICE_CLONE_MIN_SAMPLE_DURATION_MS: ${VOICE_CLONE_MIN_SAMPLE_DURATION_MS:-500}
+      MUSETALK_SERVICE_URL: ${MUSETALK_SERVICE_URL:-}
+      MUSETALK_SERVICE_TIMEOUT_SECONDS: ${MUSETALK_SERVICE_TIMEOUT_SECONDS:-1800}
+      MUSETALK_MODEL_NAME: ${MUSETALK_MODEL_NAME:-MuseTalk}
       EDGE_TTS_VOICE: ${EDGE_TTS_VOICE:-tr-TR-AhmetNeural}
       PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-}
       COSYVOICE_MODEL_PATH: ${COSYVOICE_MODEL_PATH:-}
@@ -153,6 +161,10 @@ services:
       STORAGE_ROOT: /workspace/storage/projects
       WORKER_NAME: worker-media
       PYTHONPATH: /workspace/apps/api:/workspace/workers/media
+      LIP_SYNC_PROVIDER: ${LIP_SYNC_PROVIDER:-mock}
+      MUSETALK_SERVICE_URL: ${MUSETALK_SERVICE_URL:-}
+      MUSETALK_SERVICE_TIMEOUT_SECONDS: ${MUSETALK_SERVICE_TIMEOUT_SECONDS:-1800}
+      MUSETALK_MODEL_NAME: ${MUSETALK_MODEL_NAME:-MuseTalk}
     volumes:
       - ./:/workspace
     depends_on:
@@ -189,9 +201,38 @@ services:
       - cosyvoice_models:/models
       - huggingface_cache:/cache/huggingface
 
+  musetalk-service:
+    profiles: ["musetalk"]
+    build:
+      context: .
+      dockerfile: services/musetalk/Dockerfile
+    container_name: aidublaj-musetalk-service
+    working_dir: /workspace/services/musetalk
+    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8020 --reload"
+    environment:
+      MUSETALK_MODEL_NAME: ${MUSETALK_MODEL_NAME:-MuseTalk}
+      MUSETALK_RENDER_COMMAND: ${MUSETALK_RENDER_COMMAND:-}
+      MUSETALK_BOOTSTRAP: ${MUSETALK_BOOTSTRAP:-0}
+      MUSETALK_REPO_URL: ${MUSETALK_REPO_URL:-https://github.com/TMElyralab/MuseTalk.git}
+      MUSETALK_REPO_DIR: ${MUSETALK_REPO_DIR:-/opt/musetalk/MuseTalk}
+      MUSETALK_MODEL_DIR: ${MUSETALK_MODEL_DIR:-/opt/musetalk/MuseTalk/models}
+      MUSETALK_DEVICE: ${MUSETALK_DEVICE:-auto}
+      MUSETALK_INSTALL_MODE: ${MUSETALK_INSTALL_MODE:-minimal}
+      MUSETALK_BATCH_SIZE: ${MUSETALK_BATCH_SIZE:-2}
+      MUSETALK_USE_FLOAT16: ${MUSETALK_USE_FLOAT16:-}
+      HF_HOME: /cache/huggingface
+    ports:
+      - "8020:8020"
+    gpus: all
+    volumes:
+      - ./:/workspace
+      - musetalk_runtime:/opt/musetalk
+      - huggingface_cache:/cache/huggingface
+
 volumes:
   postgres_data:
   redis_data:
   cosyvoice_runtime:
   cosyvoice_models:
+  musetalk_runtime:
   huggingface_cache:

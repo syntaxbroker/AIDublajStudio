@@ -99,7 +99,11 @@ def install_repo_requirements(repo_dir: Path) -> None:
     elif not requirements_path.exists():
         raise RuntimeError(f"CosyVoice requirements.txt not found at {requirements_path}")
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", str(requirements_path)],
+        [sys.executable, "-m", "pip", "install", "setuptools==70.0.0", "wheel", "numpy==1.26.4", "cython"],
+        check=True,
+    )
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--no-build-isolation", "-r", str(requirements_path)],
         check=True,
     )
     marker.write_text("installed\n", encoding="utf-8")

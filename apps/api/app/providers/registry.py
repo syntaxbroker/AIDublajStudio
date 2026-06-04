@@ -3,7 +3,9 @@ from app.providers.asr.faster_whisper import FasterWhisperASRProvider
 from app.providers.asr.mock import MockASRProvider
 from app.providers.diarization.mock import MockDiarizationProvider
 from app.providers.diarization.pyannote_provider import PyannoteDiarizationProvider
+from app.providers.lipsync.latentsync_provider import LatentSyncProvider
 from app.providers.lipsync.mock import MockLipSyncProvider
+from app.providers.lipsync.musetalk_provider import MuseTalkProvider
 from app.providers.tts.cosyvoice_provider import CosyVoiceTTSProvider
 from app.providers.tts.edge_tts_provider import EdgeTTSProvider
 from app.providers.tts.mock import MockTTSProvider
@@ -38,7 +40,11 @@ class ProviderRegistry:
                 "cosyvoice": CosyVoiceProvider,
                 "f5tts": F5TTSProvider,
             },
-            "LIP_SYNC": {"mock": MockLipSyncProvider},
+            "LIP_SYNC": {
+                "mock": MockLipSyncProvider,
+                "musetalk": MuseTalkProvider,
+                "latentsync": LatentSyncProvider,
+            },
         }
 
     def get(self, capability: str, provider_key: str | None = None):
@@ -60,4 +66,6 @@ class ProviderRegistry:
             return self.settings.tts_provider
         if capability == "VOICE_CLONE":
             return self.settings.voice_clone_provider
+        if capability == "LIP_SYNC":
+            return self.settings.lip_sync_provider
         return "mock"

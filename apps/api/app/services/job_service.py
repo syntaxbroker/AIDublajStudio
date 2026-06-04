@@ -146,6 +146,22 @@ class JobService:
         self.transition(job, JobState.QUEUED, worker_name="scheduler")
         return job
 
+    def create_lip_sync_job(self, project_id: str, requested_by_user_id: str, parent_job_id: str | None = None) -> Job:
+        job = Job(
+            id=str(uuid7()),
+            project_id=project_id,
+            parent_job_id=parent_job_id,
+            job_type=JobType.LIP_SYNC,
+            state=JobState.PENDING,
+            queue_name="media",
+            requested_by_user_id=requested_by_user_id,
+            input_json={},
+        )
+        self.jobs.create(job)
+        self._record_attempt(job, None, JobState.PENDING, "Job created")
+        self.transition(job, JobState.QUEUED, worker_name="scheduler")
+        return job
+
     def create_render_job(self, project_id: str, requested_by_user_id: str, parent_job_id: str | None = None) -> Job:
         job = Job(
             id=str(uuid7()),
