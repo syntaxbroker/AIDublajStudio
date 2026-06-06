@@ -19,6 +19,7 @@ class Project(Base):
     target_language: Mapped[str] = mapped_column(String(16), server_default="tr")
     status: Mapped[ProjectStatus] = mapped_column(Enum(ProjectStatus, name="project_status", create_type=False), server_default="ACTIVE")
     storage_key: Mapped[str] = mapped_column(String(255), unique=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_by_user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))

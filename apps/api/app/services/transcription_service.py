@@ -18,6 +18,7 @@ from app.services.diarization_service import DiarizationService
 from app.services.event_service import EventService
 from app.services.job_service import JobService
 from app.services.storage_service import StorageService
+from app.services.transcript_quality_service import TranscriptQualityService
 from app.services.translation_service import TranslationService
 
 
@@ -33,6 +34,7 @@ class TranscriptionService:
         self.storage = StorageService()
         self.providers = ProviderRegistry()
         self.settings = get_settings()
+        self.transcript_quality = TranscriptQualityService()
         self.diarization_service = DiarizationService(db)
         self.translation_service = TranslationService(db)
 
@@ -68,10 +70,11 @@ class TranscriptionService:
             self.transcripts.delete_segments_for_project(project.id)
 
             provider = self.providers.get("ASR")
+            requested_language = self._resolve_language_code(project.source_language)
             result = asyncio.run(
                 provider.transcribe(
                     source_path=str(proxy_path),
-                    language_code=self._resolve_language_code(project.source_language),
+                    language_code=requested_language,
                 )
             )
 
@@ -131,13 +134,24 @@ class TranscriptionService:
                 self.transcripts.create_clip(clip)
                 created_clips.append(clip)
 
+            transcript_quality_score = self.transcript_quality.score(created_segments)
+            final_transcript = " ".join(segment.text for segment in created_segments).strip()
+            detected_language = result.get("language_code")
+            language_probability = result.get("language_probability")
             job.output_json = {
                 **(job.output_json or {}),
                 "segment_count": len(created_segments),
                 "timeline_clip_count": len(created_clips),
                 "transcript_source_artifact_id": proxy_artifact.id,
                 "provider": result.get("provider", "mock"),
-                "language_code": result.get("language_code"),
+                "requested_language": requested_language,
+                "detected_language": detected_language,
+                "language_code": detected_language,
+                "language_probability": language_probability,
+                "final_transcript": final_transcript,
+                "asr_device": result.get("device"),
+                "asr_compute_type": result.get("compute_type"),
+                "transcript_quality_score": transcript_quality_score,
             }
             job.updated_at = datetime.now(UTC)
 
@@ -184,6 +198,9 @@ class TranscriptionService:
             raise
 
     def _resolve_language_code(self, project_source_language: str | None) -> str:
-        if self.settings.asr_source_language != "auto":
-            return self.settings.asr_source_language
-        return project_source_language or "auto"
+        configured_language = (self.settings.asr_source_language or "auto").strip().lower()
+        if configured_language != "auto":
+            return configured_language
+
+        project_language = (project_source_language or "auto").strip().lower()
+        return project_language or "auto"

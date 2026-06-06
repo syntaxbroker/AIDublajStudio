@@ -5,7 +5,8 @@ from psycopg.rows import dict_row
 from tests.integration.test_sprint10_acceptance import wait_for_tts_ready
 from tests.integration.test_sprint11_acceptance import wait_for_audio_mix_ready
 from tests.integration.test_sprint12_acceptance import wait_for_render_ready
-from tests.integration.test_sprint7_acceptance import create_project, upload_video, wait_for_pipeline_ready
+from tests.integration.test_sprint6_acceptance import wait_for_diarization_ready
+from tests.integration.test_sprint7_acceptance import create_project, upload_video
 
 
 VOICE_CLONE_EVENTS = {
@@ -44,7 +45,7 @@ def test_sprint18_voice_cloning_acceptance(client, auth_headers, db_conn, storag
     project = create_project(client, auth_headers, name="Sprint 18 Acceptance Project")
     project_id = project["id"]
     upload_video(client, auth_headers, project_id, valid_sample_video_file)
-    wait_for_pipeline_ready(client, auth_headers, project_id)
+    wait_for_diarization_ready(client, auth_headers, project_id)
 
     characters_response = client.post(f"/projects/{project_id}/characters/from-speakers", headers=auth_headers)
     assert characters_response.status_code == 200, characters_response.text
@@ -53,6 +54,16 @@ def test_sprint18_voice_cloning_acceptance(client, auth_headers, db_conn, storag
     assert detail["timeline_clips"]
 
     first_character = detail["characters"][0]
+    first_character_id = first_character["id"]
+    rename_response = client.patch(
+        f"/projects/{project_id}/characters/{first_character_id}",
+        headers=auth_headers,
+        json={"display_name": "Paul", "description": first_character.get("description")},
+    )
+    assert rename_response.status_code == 200, rename_response.text
+    detail = rename_response.json()
+    first_character = next(item for item in detail["characters"] if item["id"] == first_character_id)
+    assert first_character["display_name"] == "Paul"
     first_clip = next(
         clip for clip in detail["timeline_clips"] if clip["character_id"] == first_character["id"]
     )
@@ -78,13 +89,28 @@ def test_sprint18_voice_cloning_acceptance(client, auth_headers, db_conn, storag
     assert jobs["VOICE_SAMPLE_EXTRACT"]["state"] == "COMPLETED"
     assert jobs["VOICE_SAMPLE_EXTRACT"]["output_json"]["voice_sample_artifact_id"]
     assert jobs["VOICE_SAMPLE_EXTRACT"]["output_json"]["voice_reference_artifact_id"]
+    assert jobs["VOICE_SAMPLE_EXTRACT"]["output_json"]["reference_duration_ms"] > 0
+    assert jobs["VOICE_SAMPLE_EXTRACT"]["output_json"]["sample_quality_score"] >= 0
+    assert jobs["VOICE_SAMPLE_EXTRACT"]["output_json"]["normalized"] is True
+    assert jobs["VOICE_SAMPLE_EXTRACT"]["output_json"]["silence_trimmed"] is True
 
     sample_artifact = next(artifact for artifact in detail["artifacts"] if artifact["artifact_type"] == "VOICE_SAMPLE_AUDIO")
     reference_artifact = next(artifact for artifact in detail["artifacts"] if artifact["artifact_type"] == "VOICE_REFERENCE_AUDIO")
     assert (storage_root / sample_artifact["storage_path"]).exists()
     assert (storage_root / reference_artifact["storage_path"]).exists()
+    assert "paul" in sample_artifact["file_name"].lower()
+    assert "paul" in reference_artifact["file_name"].lower()
+    assert sample_artifact["metadata_json"]["character_display_name"] == "Paul"
+    assert reference_artifact["metadata_json"]["character_display_name"] == "Paul"
+    assert sample_artifact["metadata_json"]["voice_sample_name"] == "Paul Preview"
+    assert reference_artifact["metadata_json"]["voice_reference_name"] == "Paul Reference"
+    assert jobs["VOICE_SAMPLE_EXTRACT"]["output_json"]["character_display_name"] == "Paul"
+    assert jobs["VOICE_SAMPLE_EXTRACT"]["output_json"]["voice_sample_name"] == "Paul Preview"
     assert sample_artifact["parent_artifact_ids"]
     assert reference_artifact["parent_artifact_ids"] == [sample_artifact["id"]]
+    assert reference_artifact["metadata_json"]["sample_quality_score"] >= 0
+    assert reference_artifact["metadata_json"]["normalized"] is True
+    assert reference_artifact["metadata_json"]["silence_trimmed"] is True
 
     cloned_profile_response = client.post(
         f"/projects/{project_id}/characters/{first_character['id']}/voice-profile/from-sample",
@@ -100,6 +126,8 @@ def test_sprint18_voice_cloning_acceptance(client, auth_headers, db_conn, storag
     assert character_after_clone["assigned_voice_profile"]["reference_audio_artifact_id"] == reference_artifact["id"]
     assert character_after_clone["assigned_voice_profile"]["source_character_id"] == first_character["id"]
     assert character_after_clone["assigned_voice_profile"]["status"] == "ready"
+    assert character_after_clone["assigned_voice_profile"]["sample_duration_ms"] == reference_artifact["duration_ms"]
+    assert character_after_clone["assigned_voice_profile"]["quality_score"] >= 0
 
     tts_response = client.post(f"/projects/{project_id}/tts", headers=auth_headers)
     assert tts_response.status_code == 200, tts_response.text
@@ -112,6 +140,10 @@ def test_sprint18_voice_cloning_acceptance(client, auth_headers, db_conn, storag
     assert cloned_segment["provider"] == "mock_voice_clone"
     assert cloned_segment["voice_profile_id"] == character_after_clone["assigned_voice_profile_id"]
     assert cloned_segment["metadata_json"]["voice_profile_type"] == "cloned"
+    assert cloned_segment["metadata_json"]["reference_duration_ms"] == reference_artifact["duration_ms"]
+    assert cloned_segment["metadata_json"]["sample_quality_score"] >= 0
+    assert cloned_segment["metadata_json"]["normalized"] is True
+    assert cloned_segment["metadata_json"]["silence_trimmed"] is True
     assert cloned_segment["audio_artifact_id"]
 
     tts_artifact = next(artifact for artifact in detail["artifacts"] if artifact["id"] == cloned_segment["audio_artifact_id"])
@@ -167,7 +199,7 @@ def test_sprint18_missing_character_segments_returns_400(client, auth_headers, v
     project = create_project(client, auth_headers, name="Sprint 18 Missing Character Segments")
     project_id = project["id"]
     upload_video(client, auth_headers, project_id, valid_sample_video_file)
-    wait_for_pipeline_ready(client, auth_headers, project_id)
+    wait_for_diarization_ready(client, auth_headers, project_id)
 
     characters_response = client.post(f"/projects/{project_id}/characters/from-speakers", headers=auth_headers)
     assert characters_response.status_code == 200, characters_response.text

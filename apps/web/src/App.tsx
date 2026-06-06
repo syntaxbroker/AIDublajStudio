@@ -1,10 +1,12 @@
-import type { FormEvent, ReactElement } from "react";
+import type { FormEvent, ReactElement, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 
 import {
   ApiError,
   assignCharacterVoiceProfile,
+  bulkClearJobs,
+  clearJob,
   createClonedVoiceProfileFromSample,
   createProject,
   extractCharacterVoiceSample,
@@ -12,22 +14,26 @@ import {
   generateCharactersFromSpeakers,
   getApiBaseUrl,
   getArtifactContentUrl,
+  getJobLogs,
   getProject,
+  getProviderStatus,
   getTimeline,
   listVoiceProfiles,
   listProjects,
   login,
   me,
   renameCharacter,
+  retryJob,
   sortCharacters,
   startAudioMix,
+  startLipSync,
   startRender,
   startTts,
   updateTimelineClip,
   uploadProjectVideo,
 } from "./lib/api";
 import { clearStoredToken, getStoredToken, setStoredToken } from "./lib/storage";
-import type { ProjectDetail, ProjectListItem, TimelineResponse, User, VoiceProfile } from "./types";
+import type { Job, JobLogs, ProjectDetail, ProjectListItem, ProviderStatusResponse, TimelineResponse, User, VoiceProfile } from "./types";
 
 type AuthState = {
   token: string | null;
@@ -60,6 +66,38 @@ function jobIsActive(state: string): boolean {
   return state === "PENDING" || state === "QUEUED" || state === "PROCESSING";
 }
 
+function formatJobDuration(job: Job): string {
+  const start = job.started_at || job.queued_at || job.created_at;
+  const end = job.completed_at || job.cancelled_at || (job.state === "FAILED" ? job.updated_at : new Date().toISOString());
+  if (!start || !end) {
+    return "-";
+  }
+  const durationMs = Math.max(new Date(end).getTime() - new Date(start).getTime(), 0);
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}s ${minutes.toString().padStart(2, "0")}d ${seconds.toString().padStart(2, "0")}sn`
+    : `${minutes}d ${seconds.toString().padStart(2, "0")}sn`;
+}
+
+function dismissedAlertStorageKey(projectId: string): string {
+  return `aidublaj:dismissed-alerts:${projectId}`;
+}
+
+function loadDismissedAlertIds(projectId: string): Set<string> {
+  try {
+    return new Set(JSON.parse(window.localStorage.getItem(dismissedAlertStorageKey(projectId)) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDismissedAlertIds(projectId: string, values: Set<string>) {
+  window.localStorage.setItem(dismissedAlertStorageKey(projectId), JSON.stringify([...values]));
+}
+
 function getApiRootUrl(): string {
   const base = getApiBaseUrl();
   return base.endsWith("/api/v1") ? base.slice(0, -"/api/v1".length) : base;
@@ -70,6 +108,7 @@ function getNextStepMessage(detail: ProjectDetail): string {
   const hasTimeline = detail.timeline_clips.length > 0;
   const hasDubSegments = detail.dub_segments.length > 0;
   const hasFinalDubAudio = detail.artifacts.some((artifact) => artifact.artifact_type === "FINAL_DUB_AUDIO");
+  const hasLipSyncVideo = detail.artifacts.some((artifact) => artifact.artifact_type === "LIPSYNC_VIDEO");
   const hasFinalRender = detail.artifacts.some((artifact) => artifact.artifact_type === "FINAL_RENDER");
   const activeJob = detail.jobs.find((job) => jobIsActive(job.state));
 
@@ -87,6 +126,9 @@ function getNextStepMessage(detail: ProjectDetail): string {
   }
   if (!hasFinalDubAudio) {
     return "Sıradaki adım: Audio Mix Başlat ile tek Türkçe dub audio dosyası üretin.";
+  }
+  if (!hasLipSyncVideo) {
+    return "Sıradaki adım: Lip Sync Başlat ile dudak senkronlu video üretin.";
   }
   if (!hasFinalRender) {
     return "Sıradaki adım: Render Başlat ile final MP4 üretin.";
@@ -184,26 +226,82 @@ function ProtectedRoute({ auth, children }: { auth: AuthState; children: ReactEl
 
 function AppHeader({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) {
   const apiRootUrl = getApiRootUrl();
+  const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
+  const [openModal, setOpenModal] = useState<"api" | "providers" | null>(null);
+
+  useEffect(() => {
+    void getProviderStatus(auth.token).then(setProviderStatus).catch(() => setProviderStatus(null));
+  }, [auth.token]);
+
   return (
-    <header className="app-header">
-      <div>
-        <p className="eyebrow">AI Dublaj Studio</p>
-        <h1>Pipeline Control Room</h1>
-        <p className="muted">API: {getApiBaseUrl()}</p>
-        <div className="health-links">
-          <a className="inline-link" href={`${apiRootUrl}/api/v1/health`} target="_blank" rel="noreferrer">/health</a>
-          <a className="inline-link" href={`${apiRootUrl}/api/v1/health/db`} target="_blank" rel="noreferrer">/health/db</a>
-          <a className="inline-link" href={`${apiRootUrl}/api/v1/health/redis`} target="_blank" rel="noreferrer">/health/redis</a>
+    <>
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">AI Dublaj Studio</p>
+          <h1>Pipeline Control Room</h1>
+          <div className="header-tool-buttons">
+            <button className="ghost-button" type="button" onClick={() => setOpenModal("api")}>API Status</button>
+            <button
+              className={providerStatus?.has_mock_provider ? "ghost-button warning-button" : "ghost-button"}
+              type="button"
+              onClick={() => setOpenModal("providers")}
+            >
+              Provider Status
+            </button>
+          </div>
         </div>
-      </div>
-      <div className="header-actions">
-        <div className="user-badge">
-          <strong>{auth.user?.full_name}</strong>
-          <span>{auth.user?.role}</span>
+        <div className="header-actions">
+          <div className="user-badge">
+            <strong>{auth.user?.full_name}</strong>
+            <span>{auth.user?.role}</span>
+          </div>
+          <button className="ghost-button" onClick={onLogout}>Logout</button>
         </div>
-        <button className="ghost-button" onClick={onLogout}>Çıkış</button>
-      </div>
-    </header>
+      </header>
+      {openModal === "api" ? (
+        <InfoModal title="API Status" onClose={() => setOpenModal(null)}>
+          <p className="muted">API: {getApiBaseUrl()}</p>
+          <div className="modal-link-list">
+            <a className="inline-link" href={`${apiRootUrl}/api/v1/health`} target="_blank" rel="noreferrer">/health</a>
+            <a className="inline-link" href={`${apiRootUrl}/api/v1/health/db`} target="_blank" rel="noreferrer">/health/db</a>
+            <a className="inline-link" href={`${apiRootUrl}/api/v1/health/redis`} target="_blank" rel="noreferrer">/health/redis</a>
+            <a className="inline-link" href={`${apiRootUrl}/api/v1/runtime/providers`} target="_blank" rel="noreferrer">/runtime/providers</a>
+          </div>
+        </InfoModal>
+      ) : null}
+      {openModal === "providers" ? (
+        <InfoModal title="Provider Status" onClose={() => setOpenModal(null)}>
+          {providerStatus ? (
+            <div className={providerStatus.has_mock_provider ? "provider-banner provider-banner-warning" : "provider-banner"}>
+              <div>
+                <p>{providerStatus.providers.map((item) => `${item.capability}=${item.provider}`).join(" | ")}</p>
+              </div>
+              {providerStatus.has_mock_provider ? (
+                <p>{providerStatus.warning || "Mock provider active. UI processing is blocked unless ALLOW_MOCK_PROVIDERS=true; mock TTS can produce beep audio and fake durations."}</p>
+              ) : (
+                <p>All visible providers are non-mock.</p>
+              )}
+            </div>
+          ) : (
+            <p className="muted">Provider status yÃ¼klenemedi.</p>
+          )}
+        </InfoModal>
+      ) : null}
+    </>
+  );
+}
+
+function InfoModal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="info-modal-title" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <h2 id="info-modal-title">{title}</h2>
+          <button className="ghost-button" type="button" onClick={onClose}>Close</button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </section>
+    </div>
   );
 }
 
@@ -264,7 +362,7 @@ function ProjectsPage({ auth, onLogout }: { auth: AuthState; onLogout: () => voi
   const [form, setForm] = useState({
     name: "",
     description: "",
-    source_language: "en",
+    source_language: "auto",
     target_language: "tr",
   });
 
@@ -301,7 +399,7 @@ function ProjectsPage({ auth, onLogout }: { auth: AuthState; onLogout: () => voi
       setForm({
         name: "",
         description: "",
-        source_language: "en",
+        source_language: "auto",
         target_language: "tr",
       });
       navigate(`/projects/${project.id}`);
@@ -379,7 +477,7 @@ function ProjectsPage({ auth, onLogout }: { auth: AuthState; onLogout: () => voi
           <h3>Proje Listesi</h3>
           {loading ? <p className="muted">Projeler yükleniyor...</p> : null}
           {!loading && projects.length === 0 ? <p className="muted">Henüz proje yok.</p> : null}
-          <div className="list">
+          <div className="list project-list-scroll">
             {projects.map((project) => (
               <button
                 key={project.id}
@@ -414,11 +512,14 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [characterActionLoading, setCharacterActionLoading] = useState(false);
-  const [pipelineAction, setPipelineAction] = useState<"tts" | "audio-mix" | "render" | null>(null);
+  const [pipelineAction, setPipelineAction] = useState<"tts" | "audio-mix" | "lip-sync" | "render" | null>(null);
+  const [jobActionId, setJobActionId] = useState<string | null>(null);
+  const [jobLogsModal, setJobLogsModal] = useState<{ job: Job; payload: JobLogs | null; loading: boolean; error: string | null } | null>(null);
   const [timelineSavingId, setTimelineSavingId] = useState<string | null>(null);
   const [finalRenderPreviewUrl, setFinalRenderPreviewUrl] = useState<string | null>(null);
   const [artifactActionError, setArtifactActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [dismissedFailedJobIds, setDismissedFailedJobIds] = useState<Set<string>>(() => new Set());
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [voiceProfiles, setVoiceProfiles] = useState<VoiceProfile[]>([]);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, { display_name: string; description: string }>>({});
@@ -497,6 +598,14 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
   }, [projectId, token]);
 
   useEffect(() => {
+    if (!projectId) {
+      setDismissedFailedJobIds(new Set());
+      return;
+    }
+    setDismissedFailedJobIds(loadDismissedAlertIds(projectId));
+  }, [projectId]);
+
+  useEffect(() => {
     if (!detail || !token || !projectId) {
       return;
     }
@@ -511,12 +620,95 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
   }, [detail, token, projectId]);
 
   useEffect(() => {
+    if (!token || !jobLogsModal || !jobIsActive(jobLogsModal.job.state)) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      void loadJobLogs(jobLogsModal.job);
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [token, jobLogsModal?.job.id, jobLogsModal?.job.state]);
+
+  useEffect(() => {
     return () => {
       if (finalRenderPreviewUrl) {
         URL.revokeObjectURL(finalRenderPreviewUrl);
       }
     };
   }, [finalRenderPreviewUrl]);
+
+  const dismissFailedJobAlert = (jobId: string) => {
+    if (!projectId) {
+      return;
+    }
+    setDismissedFailedJobIds((current) => {
+      const next = new Set(current);
+      next.add(jobId);
+      saveDismissedAlertIds(projectId, next);
+      return next;
+    });
+  };
+
+  const loadJobLogs = async (job: Job) => {
+    if (!token) return;
+    setJobLogsModal((current) => current && current.job.id === job.id ? { ...current, loading: true, error: null } : current);
+    try {
+      const payload = await getJobLogs(token, job.id);
+      setJobLogsModal({ job, payload, loading: false, error: null });
+    } catch (err) {
+      setJobLogsModal({ job, payload: null, loading: false, error: extractMessage(err) });
+    }
+  };
+
+  const openJobLogs = (job: Job) => {
+    setJobLogsModal({ job, payload: null, loading: true, error: null });
+    void loadJobLogs(job);
+  };
+
+  const retryPipelineJob = async (job: Job) => {
+    if (!token) return;
+    setJobActionId(job.id);
+    setError(null);
+    try {
+      await retryJob(token, job.id);
+      setNotice(`${job.job_type} retry kuyruğa alındı.`);
+      await refreshDetail();
+    } catch (err) {
+      setError(extractMessage(err));
+    } finally {
+      setJobActionId(null);
+    }
+  };
+
+  const clearPipelineJob = async (job: Job) => {
+    if (!token) return;
+    setJobActionId(job.id);
+    setError(null);
+    try {
+      await clearJob(token, job.id);
+      setNotice(`${job.job_type} listeden temizlendi.`);
+      await refreshDetail();
+    } catch (err) {
+      setError(extractMessage(err));
+    } finally {
+      setJobActionId(null);
+    }
+  };
+
+  const clearPipelineJobsByState = async (state: "COMPLETED" | "FAILED") => {
+    if (!token || !projectId) return;
+    setJobActionId(`bulk-${state}`);
+    setError(null);
+    try {
+      const payload = await bulkClearJobs(token, projectId, state);
+      setNotice(`${payload.archived_count} ${state} job listeden temizlendi.`);
+      await refreshDetail();
+    } catch (err) {
+      setError(extractMessage(err));
+    } finally {
+      setJobActionId(null);
+    }
+  };
 
   const handleUpload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -561,6 +753,30 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     }
   };
 
+  const saveCharacterDraftIfChanged = async (characterId: string): Promise<ProjectDetail | null> => {
+    if (!token || !projectId || !detail) {
+      return null;
+    }
+    const character = detail.characters.find((item) => item.id === characterId);
+    const draft = renameDrafts[characterId];
+    if (!character || !draft) {
+      return null;
+    }
+    const nextName = draft.display_name.trim();
+    const nextDescription = draft.description || null;
+    const currentDescription = character.description || null;
+    if (!nextName) {
+      throw new Error("Karakter adı boş olamaz.");
+    }
+    if (nextName === character.display_name && nextDescription === currentDescription) {
+      return null;
+    }
+    return renameCharacter(token, projectId, characterId, {
+      display_name: nextName,
+      description: nextDescription,
+    });
+  };
+
   const handleRenameCharacter = async (characterId: string) => {
     if (!token || !projectId) return;
     const draft = renameDrafts[characterId];
@@ -570,11 +786,10 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     setArtifactActionError(null);
     setNotice(null);
     try {
-      const project = await renameCharacter(token, projectId, characterId, {
-        display_name: draft.display_name,
-        description: draft.description || null,
-      });
-      setDetail(project);
+      const project = await saveCharacterDraftIfChanged(characterId);
+      if (project) {
+        setDetail(project);
+      }
       await refreshDetail();
     } catch (err) {
       setError(extractMessage(err));
@@ -613,6 +828,10 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     setArtifactActionError(null);
     setNotice(null);
     try {
+      const savedProject = await saveCharacterDraftIfChanged(characterId);
+      if (savedProject) {
+        setDetail(savedProject);
+      }
       const project = await extractCharacterVoiceSample(token, projectId, characterId);
       setDetail(project);
       setNotice("Ses örneği çıkarma işi kuyruğa alındı. Media worker tamamlayınca sample artifact görünecek.");
@@ -631,6 +850,10 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     setArtifactActionError(null);
     setNotice(null);
     try {
+      const savedProject = await saveCharacterDraftIfChanged(characterId);
+      if (savedProject) {
+        setDetail(savedProject);
+      }
       const project = await createClonedVoiceProfileFromSample(token, projectId, characterId);
       setDetail(project);
       setNotice("Klon ses profili oluşturuldu ve karaktere atandı.");
@@ -679,8 +902,12 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
     }
   };
 
-  const runPipelineAction = async (action: "tts" | "audio-mix" | "render") => {
+  const runPipelineAction = async (action: "tts" | "audio-mix" | "lip-sync" | "render") => {
     if (!token || !projectId) return;
+    if (action === "render" && !detail.artifacts.some((artifact) => artifact.artifact_type === "LIPSYNC_VIDEO")) {
+      setError("Render için önce Lip Sync çalıştırın. LIPSYNC_VIDEO yoksa render Source Video fallback kullanır.");
+      return;
+    }
     setPipelineAction(action);
     setError(null);
     setArtifactActionError(null);
@@ -691,6 +918,8 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
         project = await startTts(token, projectId);
       } else if (action === "audio-mix") {
         project = await startAudioMix(token, projectId);
+      } else if (action === "lip-sync") {
+        project = await startLipSync(token, projectId);
       } else {
         project = await startRender(token, projectId);
       }
@@ -699,6 +928,8 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
         setNotice("TTS başlatıldı. Segment sesleri üretiliyor.");
       } else if (action === "audio-mix") {
         setNotice("Audio mix başlatıldı. Tek Türkçe dub audio hazırlanıyor.");
+      } else if (action === "lip-sync") {
+        setNotice("Lip Sync başlatıldı. Dudak senkronlu video hazırlanıyor.");
       } else {
         setNotice("Render başlatıldı. Final MP4 hazırlanıyor.");
       }
@@ -771,19 +1002,28 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
 
   const characters = sortCharacters(detail.characters);
   const turkishVoiceProfiles = voiceProfiles.filter((profile) => profile.language === "tr");
+  const getPreferredVoiceArtifactForCharacter = (characterId: string, artifactType: string) => {
+    const matches = detail.artifacts.filter(
+      (artifact) =>
+        artifact.artifact_type === artifactType &&
+        String(artifact.metadata_json?.character_id ?? "") === characterId,
+    );
+    matches.sort((left, right) => {
+      const leftHasDisplayName = left.metadata_json?.voice_sample_name || left.metadata_json?.voice_reference_name || left.metadata_json?.character_display_name;
+      const rightHasDisplayName = right.metadata_json?.voice_sample_name || right.metadata_json?.voice_reference_name || right.metadata_json?.character_display_name;
+      if (Boolean(leftHasDisplayName) !== Boolean(rightHasDisplayName)) {
+        return leftHasDisplayName ? -1 : 1;
+      }
+      return right.created_at.localeCompare(left.created_at);
+    });
+    return matches[0];
+  };
   const getLatestSampleArtifactForCharacter = (characterId: string) =>
-    detail.artifacts.find(
-      (artifact) =>
-        artifact.artifact_type === "VOICE_SAMPLE_AUDIO" &&
-        String(artifact.metadata_json?.character_id ?? "") === characterId,
-    );
+    getPreferredVoiceArtifactForCharacter(characterId, "VOICE_SAMPLE_AUDIO");
   const getLatestReferenceArtifactForCharacter = (characterId: string) =>
-    detail.artifacts.find(
-      (artifact) =>
-        artifact.artifact_type === "VOICE_REFERENCE_AUDIO" &&
-        String(artifact.metadata_json?.character_id ?? "") === characterId,
-    );
+    getPreferredVoiceArtifactForCharacter(characterId, "VOICE_REFERENCE_AUDIO");
   const finalDubAudioArtifacts = detail.artifacts.filter((artifact) => artifact.artifact_type === "FINAL_DUB_AUDIO");
+  const lipSyncVideoArtifacts = detail.artifacts.filter((artifact) => artifact.artifact_type === "LIPSYNC_VIDEO");
   const finalRenderArtifacts = detail.artifacts.filter((artifact) => artifact.artifact_type === "FINAL_RENDER");
   const getRenderSourceLabel = (artifact: { metadata_json?: Record<string, unknown> }) => {
     const label = String(artifact.metadata_json?.source_video_label ?? "");
@@ -804,9 +1044,72 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
   };
   const getRenderSourceArtifactId = (artifact: { metadata_json?: Record<string, unknown> }) =>
     String(artifact.metadata_json?.source_video_artifact_id ?? "");
+  const getVoiceArtifactDisplayName = (
+    artifact: { artifact_type?: string; file_name: string; metadata_json?: Record<string, unknown> } | undefined,
+    fallback: string,
+  ) => {
+    if (!artifact) {
+      return fallback;
+    }
+    const metadata = artifact.metadata_json || {};
+    if (artifact.artifact_type === "VOICE_REFERENCE_AUDIO") {
+      return String(metadata.voice_reference_name ?? metadata.character_display_name ?? artifact.file_name);
+    }
+    return String(
+      metadata.voice_sample_name
+        ?? metadata.voice_reference_name
+        ?? metadata.character_display_name
+        ?? artifact.file_name,
+    );
+  };
+  const getLatestVoiceSampleJobForCharacter = (characterId: string) =>
+    detail.jobs
+      .filter(
+        (job) =>
+          job.job_type === "VOICE_SAMPLE_EXTRACT" &&
+          String(job.input_json?.character_id ?? job.output_json?.character_id ?? "") === characterId,
+      )
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+  const getVoiceSampleStatus = (
+    job: ProjectDetail["jobs"][number] | undefined,
+    sampleArtifact: { file_name: string; metadata_json?: Record<string, unknown> } | undefined,
+  ) => {
+    if (!job && sampleArtifact) {
+      return { label: "Completed", className: "status-completed", isActive: false, error: null };
+    }
+    if (!job) {
+      return { label: "Not started", className: "status-pending", isActive: false, error: null };
+    }
+    if (job.state === "PENDING" || job.state === "QUEUED") {
+      return { label: "Queued", className: "status-queued", isActive: true, error: null };
+    }
+    if (job.state === "PROCESSING") {
+      return { label: "Generating voice sample...", className: "status-processing", isActive: true, error: null };
+    }
+    if (job.state === "COMPLETED") {
+      return { label: "Completed", className: "status-completed", isActive: false, error: null };
+    }
+    if (job.state === "FAILED") {
+      return {
+        label: "Failed",
+        className: "status-failed",
+        isActive: false,
+        error: String(job.error_json?.message ?? "Voice sample generation failed."),
+      };
+    }
+    return { label: job.state, className: "status-pending", isActive: false, error: null };
+  };
   const activeJob = detail.jobs.find((job) => jobIsActive(job.state));
-  const failedJobs = detail.jobs.filter((job) => job.state === "FAILED");
+  const failedJobs = detail.jobs.filter((job) => job.state === "FAILED" && !dismissedFailedJobIds.has(job.id));
   const nextStepMessage = getNextStepMessage(detail);
+  const latestLipSyncJob = detail.jobs
+    .filter((job) => job.job_type === "LIP_SYNC")
+    .sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+  const lipSyncStatus = lipSyncVideoArtifacts.length
+    ? "LIPSYNC_VIDEO hazır"
+    : latestLipSyncJob
+      ? `${latestLipSyncJob.state}`
+      : "Henüz çalıştırılmadı";
 
   return (
     <div className="page-shell">
@@ -821,15 +1124,16 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
           <button className="ghost-button" onClick={() => void refreshDetail()} disabled={refreshing}>
             {refreshing ? "Yenileniyor..." : "Refresh"}
           </button>
-          <button className="primary-button" onClick={() => void handleGenerateCharacters()} disabled={characterActionLoading}>
-            {characterActionLoading ? "Çalışıyor..." : "Generate Characters"}
-          </button>
         </div>
       </div>
 
-      {error ? <div className="error-box">{error}</div> : null}
-      {artifactActionError ? <div className="error-box">{artifactActionError}</div> : null}
-      {notice ? <div className="info-box">{notice}</div> : null}
+      {error ? <DismissibleAlert className="error-box" onDismiss={() => setError(null)}>{error}</DismissibleAlert> : null}
+      {artifactActionError ? (
+        <DismissibleAlert className="error-box" onDismiss={() => setArtifactActionError(null)}>
+          {artifactActionError}
+        </DismissibleAlert>
+      ) : null}
+      {notice ? <DismissibleAlert className="info-box" onDismiss={() => setNotice(null)}>{notice}</DismissibleAlert> : null}
 
       <div className="grid summary-grid">
         <StatCard label="Artifacts" value={detail.artifacts.length} />
@@ -842,8 +1146,21 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
       </div>
 
       <section className="panel">
+        <h3>Video Upload</h3>
+        <form className="stack" onSubmit={handleUpload}>
+          <input name="video" type="file" accept="video/mp4,video/*" />
+          <button className="primary-button" type="submit" disabled={uploading}>
+            {uploading ? "Upload ediliyor..." : "Video Upload"}
+          </button>
+        </form>
+      </section>
+
+      <section className="panel">
         <h3>Pipeline Actions</h3>
         <div className="action-grid">
+          <button className="primary-button" onClick={() => void handleGenerateCharacters()} disabled={characterActionLoading}>
+            {characterActionLoading ? "Çalışıyor..." : "Generate Characters"}
+          </button>
           <button
             className="primary-button"
             onClick={() => void runPipelineAction("tts")}
@@ -860,6 +1177,13 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
           </button>
           <button
             className="primary-button"
+            onClick={() => void runPipelineAction("lip-sync")}
+            disabled={pipelineAction !== null}
+          >
+            {pipelineAction === "lip-sync" ? "Lip Sync Çalışıyor..." : "Lip Sync Başlat"}
+          </button>
+          <button
+            className="primary-button"
             onClick={() => void runPipelineAction("render")}
             disabled={pipelineAction !== null}
           >
@@ -872,57 +1196,122 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
             {" "}Son yenileme: {lastRefreshedAt ? formatDate(lastRefreshedAt) : "-"}
           </p>
           <p className="muted">Aktif job: {activeJob ? `${activeJob.job_type} · ${activeJob.state}` : "Yok"}</p>
+          <p className="muted">Lip Sync Status: {lipSyncStatus}</p>
           <div className="next-step-box">
             <strong>Sıradaki adım</strong>
             <p>{nextStepMessage}</p>
           </div>
           {failedJobs.map((job) => (
-            <div className="error-box" key={job.id}>
+            <DismissibleAlert
+              className="error-box"
+              key={job.id}
+              onDismiss={() => dismissFailedJobAlert(job.id)}
+            >
               {job.job_type} hata: {String(job.error_json?.message ?? "Bilinmeyen hata")}
-            </div>
+            </DismissibleAlert>
           ))}
         </div>
       </section>
 
-      <div className="grid two-columns">
-        <section className="panel">
-          <h3>Video Upload</h3>
-          <form className="stack" onSubmit={handleUpload}>
-            <input name="video" type="file" accept="video/mp4,video/*" />
-            <button className="primary-button" type="submit" disabled={uploading}>
-              {uploading ? "Upload ediliyor..." : "Video Upload"}
-            </button>
-          </form>
-        </section>
-
-        <section className="panel">
+      <section className="panel">
+        <div className="section-heading-row">
           <h3>Pipeline / Job Status</h3>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Job</th>
-                  <th>State</th>
-                  <th>Queue</th>
-                  <th>Worker</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.jobs.map((job) => (
-                  <tr key={job.id}>
-                    <td>{job.job_type}</td>
-                    <td><span className={`status-pill status-${job.state.toLowerCase()}`}>{job.state}</span></td>
-                    <td>{job.queue_name}</td>
-                    <td>{job.worker_name || "-"}</td>
-                    <td>{formatDate(job.updated_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="action-row compact-actions">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => void clearPipelineJobsByState("COMPLETED")}
+              disabled={jobActionId !== null}
+            >
+              Clear Completed
+            </button>
+            <button
+              className="ghost-button danger-button"
+              type="button"
+              onClick={() => void clearPipelineJobsByState("FAILED")}
+              disabled={jobActionId !== null}
+            >
+              Clear Failed
+            </button>
           </div>
-        </section>
-      </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>State</th>
+                <th>Queue</th>
+                <th>Worker</th>
+                <th>Started</th>
+                <th>Finished</th>
+                <th>Duration</th>
+                <th>Failure Reason</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.jobs.map((job) => (
+                <tr key={job.id}>
+                  <td>{job.job_type}</td>
+                  <td><span className={`status-pill status-${job.state.toLowerCase()}`}>{job.state}</span></td>
+                  <td>{job.queue_name}</td>
+                  <td>{job.worker_name || "-"}</td>
+                  <td>{formatDate(job.started_at || job.queued_at)}</td>
+                  <td>{formatDate(job.completed_at || job.cancelled_at || (job.state === "FAILED" ? job.updated_at : null))}</td>
+                  <td>{formatJobDuration(job)}</td>
+                  <td className="mono-cell">{job.state === "FAILED" ? String(job.error_json?.message ?? "Bilinmeyen hata") : "-"}</td>
+                  <td>
+                    <div className="job-actions">
+                      <button className="icon-action-button" type="button" onClick={() => openJobLogs(job)}>
+                        Logs
+                      </button>
+                      {(job.state === "FAILED" || job.state === "CANCELLED") ? (
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          onClick={() => void retryPipelineJob(job)}
+                          disabled={jobActionId !== null}
+                        >
+                          Retry
+                        </button>
+                      ) : null}
+                      {(job.state === "FAILED" || job.state === "COMPLETED" || job.state === "CANCELLED") ? (
+                        <button
+                          className="icon-action-button danger-button"
+                          type="button"
+                          onClick={() => void clearPipelineJob(job)}
+                          disabled={jobActionId !== null}
+                        >
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {jobLogsModal ? (
+        <InfoModal title={`Job Logs · ${jobLogsModal.job.job_type}`} onClose={() => setJobLogsModal(null)}>
+          <div className="job-log-meta">
+            <span>State: <strong>{jobLogsModal.payload?.state ?? jobLogsModal.job.state}</strong></span>
+            <span>Worker: <strong>{jobLogsModal.payload?.worker ?? jobLogsModal.job.worker_name ?? "-"}</strong></span>
+            <span>Queue: <strong>{jobLogsModal.job.queue_name}</strong></span>
+            <span>Duration: <strong>{formatJobDuration(jobLogsModal.job)}</strong></span>
+          </div>
+          {jobLogsModal.error ? <div className="error-box">{jobLogsModal.error}</div> : null}
+          <pre className="job-log-viewer">
+            {jobLogsModal.loading && !jobLogsModal.payload
+              ? "Loglar yükleniyor..."
+              : (jobLogsModal.payload?.logs.length ? jobLogsModal.payload.logs.join("\n") : "Log kaydı yok.")}
+          </pre>
+          {jobIsActive(jobLogsModal.job.state) ? <p className="muted">Canlı takip açık: 5 saniyede bir yenilenir.</p> : null}
+        </InfoModal>
+      ) : null}
 
       <section className="panel">
         <h3>Artifacts</h3>
@@ -952,9 +1341,36 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
 
       <div className="grid two-columns">
         <section className="panel">
+          <h3>Lip Sync Video</h3>
+          {!lipSyncVideoArtifacts.length ? <p className="muted">Henüz LIPSYNC_VIDEO yok.</p> : null}
+          <div className="stack stack-scroll-four">
+            {lipSyncVideoArtifacts.map((artifact) => (
+              <div className="subpanel" key={artifact.id}>
+                <strong>{artifact.file_name}</strong>
+                <p className="muted mono-cell">{artifact.storage_path}</p>
+                <p className="muted">
+                  {String(artifact.metadata_json?.provider ?? "-")} · {String(artifact.metadata_json?.quality_preset ?? "-")} · {String(artifact.metadata_json?.resolution ?? "-")} · {String(artifact.metadata_json?.fps ?? "-")} fps
+                </p>
+                <p className="muted mono-cell">
+                  source={String(artifact.metadata_json?.source_video_artifact_id ?? "-")} audio={String(artifact.metadata_json?.audio_artifact_id ?? "-")}
+                </p>
+                <div className="row-actions">
+                  <span className="muted">
+                    processing={String(artifact.metadata_json?.processing_time_ms ?? "-")} ms · mock={String(artifact.metadata_json?.mock ?? "-")}
+                  </span>
+                  <div className="row-button-group">
+                    <button className="ghost-button" onClick={() => void handleOpenArtifact(artifact.id)}>Play / Open</button>
+                    <button className="ghost-button" onClick={() => void handleDownloadArtifact(artifact.id, artifact.file_name)}>Download</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="panel">
           <h3>Final Dub Audio</h3>
           {!finalDubAudioArtifacts.length ? <p className="muted">Henüz FINAL_DUB_AUDIO yok.</p> : null}
-          <div className="stack">
+          <div className="stack stack-scroll-four">
             {finalDubAudioArtifacts.map((artifact) => (
               <div className="subpanel" key={artifact.id}>
                 <strong>{artifact.file_name}</strong>
@@ -977,7 +1393,7 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
         <section className="panel">
           <h3>Final Render</h3>
           {!finalRenderArtifacts.length ? <p className="muted">Henüz FINAL_RENDER yok.</p> : null}
-          <div className="stack">
+          <div className="stack stack-scroll-four">
             {finalRenderArtifacts.map((artifact) => (
               <div className="subpanel" key={artifact.id}>
                 <strong>{artifact.file_name}</strong>
@@ -991,6 +1407,10 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
                     <button className="ghost-button" onClick={() => void handleDownloadArtifact(artifact.id, artifact.file_name)}>Download</button>
                   </div>
                 </div>
+                <p className="muted">
+                  Source: {getRenderSourceLabel(artifact)}
+                  {getRenderSourceArtifactId(artifact) ? ` · ${getRenderSourceArtifactId(artifact)}` : ""}
+                </p>
                 {finalRenderPreviewUrl ? (
                   <video className="preview-video" controls src={finalRenderPreviewUrl} />
                 ) : null}
@@ -1015,7 +1435,7 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
           rows={detail.translation_segments.map((segment) => ({
             id: segment.id,
             primary: `${segment.source_language || "auto"} → ${segment.target_language}`,
-            secondary: segment.translated_text,
+            secondary: `Faithful: ${segment.faithful_text || segment.translated_text} | Adapted: ${segment.adapted_text || segment.translated_text} | Semantic: ${segment.semantic_similarity_score ?? "-"}`,
             meta: `${segment.provider || "-"} · transcript ${segment.transcript_segment_id}`,
           }))}
         />
@@ -1034,7 +1454,7 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
         <section className="panel">
           <h3>Voice Profiles</h3>
           {!turkishVoiceProfiles.length ? <p className="muted">Henüz voice profile yok.</p> : null}
-          <div className="stack">
+          <div className="stack voice-profile-scroll">
             {turkishVoiceProfiles.map((profile) => (
               <div className="subpanel" key={profile.id}>
                 <strong>{profile.display_name}</strong>
@@ -1052,12 +1472,14 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
         <section className="panel">
           <h3>Characters</h3>
           {!characters.length ? <p className="muted">Henüz character yok. Generate Characters ile oluşturun.</p> : null}
-          <div className="stack">
+          <div className="stack stack-scroll-four">
             {characters.map((character) => (
               <div className="subpanel" key={character.id}>
                 {(() => {
                   const sampleArtifact = getLatestSampleArtifactForCharacter(character.id);
                   const referenceArtifact = getLatestReferenceArtifactForCharacter(character.id);
+                  const voiceSampleJob = getLatestVoiceSampleJobForCharacter(character.id);
+                  const voiceSampleStatus = getVoiceSampleStatus(voiceSampleJob, sampleArtifact);
                   return (
                     <>
                 <div className="inline-fields">
@@ -1113,14 +1535,32 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
                     </select>
                   </label>
                 </div>
-                <div className="stack compact-stack">
-                  <span className="muted">
-                    Sample: {sampleArtifact ? sampleArtifact.file_name : "Henüz yok"}
-                  </span>
-                  <span className="muted">
-                    Reference: {referenceArtifact ? referenceArtifact.file_name : "Henüz yok"}
-                  </span>
-                </div>
+                  <div className="stack compact-stack">
+                    <span className="muted">
+                      Voice Sample Status: <span className={`status-pill ${voiceSampleStatus.className}`}>{voiceSampleStatus.label}</span>
+                    </span>
+                    {voiceSampleStatus.error ? <span className="error-text">{voiceSampleStatus.error}</span> : null}
+                    <span className="muted">
+                      Sample: {getVoiceArtifactDisplayName(sampleArtifact, "Henüz yok")}
+                    </span>
+                    <span className="muted">
+                      Reference: {getVoiceArtifactDisplayName(referenceArtifact, "Henüz yok")}
+                    </span>
+                    {sampleArtifact || referenceArtifact ? (
+                      <div className="row-button-group">
+                        {sampleArtifact ? (
+                          <button className="ghost-button" type="button" onClick={() => void handleOpenArtifact(sampleArtifact.id)}>
+                            Play Sample
+                          </button>
+                        ) : null}
+                        {referenceArtifact ? (
+                          <button className="ghost-button" type="button" onClick={() => void handleOpenArtifact(referenceArtifact.id)}>
+                            Play Reference
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 <div className="row-actions">
                   <div className="stack compact-stack">
                     <span className="muted">{character.source_type}</span>
@@ -1130,14 +1570,26 @@ function ProjectDetailPage({ auth, onLogout }: { auth: AuthState; onLogout: () =
                     <span className="muted">
                       Profile Type: {character.assigned_voice_profile?.profile_type ?? "default"}
                     </span>
+                    <span className="muted">
+                      Clone Status: {character.assigned_voice_profile?.status ?? "not assigned"}
+                    </span>
+                    <span className="muted">
+                      Clone Provider: {character.assigned_voice_profile?.provider ?? "-"}
+                    </span>
+                    <span className="muted">
+                      Reference Audio Duration: {character.assigned_voice_profile?.sample_duration_ms ? formatMs(character.assigned_voice_profile.sample_duration_ms) : "-"}
+                    </span>
+                    <span className="muted">
+                      Clone Quality Score: {character.assigned_voice_profile?.quality_score ?? character.assigned_voice_profile?.average_similarity_score ?? "-"}
+                    </span>
                   </div>
                   <div className="row-button-group">
                     <button
                       className="ghost-button"
                       onClick={() => void handleExtractVoiceSample(character.id)}
-                      disabled={characterActionLoading}
+                      disabled={characterActionLoading || voiceSampleStatus.isActive}
                     >
-                      Ses Ornegi Cikar
+                      {voiceSampleStatus.isActive ? "Generating..." : voiceSampleStatus.label === "Failed" ? "Retry Voice Sample" : "Generate Voice Sample"}
                     </button>
                     <button
                       className="ghost-button"
@@ -1349,12 +1801,23 @@ function StatCard({ label, value }: { label: string; value: number }) {
   );
 }
 
+function DismissibleAlert({ className, children, onDismiss }: { className: string; children: ReactNode; onDismiss: () => void }) {
+  return (
+    <div className={`dismissible-alert ${className}`}>
+      <span>{children}</span>
+      <button className="alert-close-button" type="button" aria-label="Bildirimi kapat" onClick={onDismiss}>
+        x
+      </button>
+    </div>
+  );
+}
+
 function SegmentPanel({ title, rows }: { title: string; rows: Array<{ id: string; primary: string; secondary: string; meta: string }> }) {
   return (
     <section className="panel">
       <h3>{title}</h3>
       {!rows.length ? <p className="muted">Henüz veri yok.</p> : null}
-      <div className="stack">
+      <div className="stack stack-scroll-four">
         {rows.map((row) => (
           <div className="subpanel" key={row.id}>
             <strong>{row.primary}</strong>

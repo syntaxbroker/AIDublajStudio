@@ -13,6 +13,7 @@ from app.providers.tts.piper_provider import PiperTTSProvider
 from app.providers.voice_clone.cosyvoice_provider import CosyVoiceProvider
 from app.providers.voice_clone.f5tts_provider import F5TTSProvider
 from app.providers.voice_clone.mock import MockVoiceCloneProvider
+from app.providers.voice_conversion.seedvc_provider import SeedVCProvider
 from app.providers.translation.mock import MockTranslationProvider
 from app.providers.translation.ollama import OllamaTranslationProvider
 from app.providers.translation.openai_provider import OpenAITranslationProvider
@@ -40,6 +41,9 @@ class ProviderRegistry:
                 "cosyvoice": CosyVoiceProvider,
                 "f5tts": F5TTSProvider,
             },
+            "VOICE_CONVERSION": {
+                "seedvc": SeedVCProvider,
+            },
             "LIP_SYNC": {
                 "mock": MockLipSyncProvider,
                 "musetalk": MuseTalkProvider,
@@ -66,6 +70,8 @@ class ProviderRegistry:
             return self.settings.tts_provider
         if capability == "VOICE_CLONE":
             return self.settings.voice_clone_provider
+        if capability == "VOICE_CONVERSION":
+            return self.settings.voice_conversion_provider
         if capability == "LIP_SYNC":
             return self.settings.lip_sync_provider
         return "mock"

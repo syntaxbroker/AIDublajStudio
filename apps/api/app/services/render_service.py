@@ -58,6 +58,8 @@ class RenderService:
 
             final_dub_audio = self._resolve_final_dub_audio(project.id)
             video_source = self._resolve_video_source(project.id)
+            source_video = self._resolve_source_video(project.id)
+            self._validate_resolution_preservation(source_video, video_source)
             audio_path = self.storage.absolute_path(final_dub_audio.storage_path)
             video_path = self.storage.absolute_path(video_source.storage_path)
 
@@ -81,7 +83,11 @@ class RenderService:
             output_path = self.storage.ensure_project_structure(project.storage_key) / "renders" / f"{uuid7()}-final-render.mp4"
             self.ffmpeg.render_video_with_audio(video_path, audio_path, output_path)
             metadata = self.ffprobe.probe(output_path)
+            self._validate_render_output_resolution(source_video, metadata)
             payload = output_path.read_bytes()
+            source_resolution = self._resolution_label(source_video.width, source_video.height)
+            source_video_resolution = self._resolution_label(video_source.width, video_source.height)
+            final_resolution = self._resolution_label(self._width(metadata), self._height(metadata))
 
             artifact = Artifact(
                 id=str(uuid7()),
@@ -105,6 +111,15 @@ class RenderService:
                     "source_video_artifact_type": video_source.artifact_type.value,
                     "source_video_label": self._video_source_label(video_source),
                     "audio_artifact_id": final_dub_audio.id,
+                    "source_width": source_video.width,
+                    "source_height": source_video.height,
+                    "working_width": self._width(metadata),
+                    "working_height": self._height(metadata),
+                    "source_resolution": source_resolution,
+                    "video_source_resolution": source_video_resolution,
+                    "final_resolution": final_resolution,
+                    "resolution_preserved": source_resolution == final_resolution,
+                    "resolution_preservation_policy": "source",
                 },
             )
             self.artifacts.create(artifact)
@@ -170,6 +185,45 @@ class RenderService:
             return proxy_video
         raise AppError("RENDER_VIDEO_SOURCE_NOT_FOUND", "Render video source not found", 404)
 
+    def _resolve_source_video(self, project_id: str) -> Artifact:
+        artifact = next(
+            (item for item in self.artifacts.list_for_project(project_id) if item.artifact_type == ArtifactType.SOURCE_VIDEO),
+            None,
+        )
+        if not artifact:
+            raise AppError("SOURCE_VIDEO_NOT_FOUND", "Source video artifact not found", 404)
+        return artifact
+
+    def _validate_resolution_preservation(self, source_video: Artifact, video_source: Artifact) -> None:
+        if not source_video.width or not source_video.height or not video_source.width or not video_source.height:
+            return
+        if video_source.width < source_video.width or video_source.height < source_video.height:
+            raise AppError(
+                "RESOLUTION_PRESERVATION_FAILED",
+                (
+                    "Resolution preservation failed. "
+                    f"Source: {source_video.width}x{source_video.height}. "
+                    f"Render source: {video_source.width}x{video_source.height}."
+                ),
+                409,
+            )
+
+    def _validate_render_output_resolution(self, source_video: Artifact, metadata: dict) -> None:
+        final_width = self._width(metadata)
+        final_height = self._height(metadata)
+        if not source_video.width or not source_video.height or not final_width or not final_height:
+            return
+        if final_width != source_video.width or final_height != source_video.height:
+            raise AppError(
+                "FINAL_RENDER_RESOLUTION_MISMATCH",
+                (
+                    "Final render resolution does not match source. "
+                    f"Source: {source_video.width}x{source_video.height}. "
+                    f"Final: {final_width}x{final_height}."
+                ),
+                409,
+            )
+
     def _video_source_label(self, artifact: Artifact) -> str:
         if artifact.artifact_type == ArtifactType.LIPSYNC_VIDEO:
             return "Lip Sync Video"
@@ -226,6 +280,11 @@ class RenderService:
     def _sample_rate(self, metadata: dict) -> int | None:
         sample_rate = self._audio_stream(metadata).get("sample_rate")
         return int(sample_rate) if sample_rate else None
+
+    def _resolution_label(self, width: int | None, height: int | None) -> str | None:
+        if width and height:
+            return f"{width}x{height}"
+        return None
 
     def _sha256(self, payload: bytes) -> str:
         import hashlib

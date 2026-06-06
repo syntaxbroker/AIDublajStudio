@@ -78,6 +78,11 @@ def test_sprint20_lip_sync_acceptance(client, auth_headers, db_conn, storage_roo
     assert lipsync_path.exists()
     assert lipsync_path.stat().st_size > 0
     assert lipsync_artifact["parent_artifact_ids"]
+    assert lipsync_artifact["metadata_json"]["provider"] == "mock"
+    assert lipsync_artifact["metadata_json"]["mock"] is True
+    assert lipsync_artifact["metadata_json"]["source_video_artifact_id"]
+    assert lipsync_artifact["metadata_json"]["audio_artifact_id"]
+    assert lipsync_artifact["metadata_json"]["quality_preset"] == "mock"
 
     event_types = {event["event_type"] for event in detail["events"]}
     for event_type in LIP_SYNC_EVENTS:

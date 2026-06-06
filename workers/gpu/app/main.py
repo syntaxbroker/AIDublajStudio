@@ -1,5 +1,7 @@
 import os
 import time
+import logging
+from datetime import UTC, datetime
 
 from app.db.session import SessionLocal
 from app.repositories.job_repository import JobRepository
@@ -14,6 +16,9 @@ QUEUE_NAMES = ("transcribe", "diarize", "translate", "tts")
 WORKER_NAME = os.getenv("WORKER_NAME", "worker-gpu-0")
 POLL_SECONDS = float(os.getenv("GPU_WORKER_POLL_SECONDS", "2"))
 
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("worker-gpu")
+
 
 def run() -> None:
     with SessionLocal() as db:
@@ -27,6 +32,15 @@ def run() -> None:
                     job = JobRepository(db).get_next_queued_job(queue_name)
                     if not job:
                         continue
+                    logger.info(
+                        "Dispatching GPU job",
+                        extra={
+                            "job_id": job.id,
+                            "job_type": job.job_type.value,
+                            "queue_name": job.queue_name,
+                            "dispatch_time": datetime.now(UTC).isoformat(),
+                        },
+                    )
                     if queue_name == "transcribe":
                         TranscriptionService(db).process_job(job.id, WORKER_NAME)
                     elif queue_name == "diarize":

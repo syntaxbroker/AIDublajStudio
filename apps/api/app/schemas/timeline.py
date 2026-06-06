@@ -23,6 +23,9 @@ class TimelineClipResponse(BaseModel):
     track_index: int
     start_ms: int
     end_ms: int
+    source_duration_ms: int
+    translated_duration_ms: int | None = None
+    duration_match_score: float | None = None
     lane: str
     is_locked: bool
     edit_version: int

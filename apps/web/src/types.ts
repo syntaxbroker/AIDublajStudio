@@ -35,6 +35,7 @@ export type Artifact = {
   mime_type: string | null;
   size_bytes: number | null;
   checksum_sha256: string | null;
+  duration_ms: number | null;
   created_by_job_id: string | null;
   metadata_json: Record<string, unknown>;
   parent_artifact_ids: string[];
@@ -52,8 +53,34 @@ export type Job = {
   input_json: Record<string, unknown>;
   output_json: Record<string, unknown>;
   error_json: Record<string, unknown> | null;
+  queued_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type JobLogs = {
+  job_id: string;
+  state: string;
+  worker: string | null;
+  logs: string[];
+};
+
+export type JobRetryResponse = {
+  old_job_id: string;
+  new_job_id: string;
+  status: string;
+};
+
+export type JobClearResponse = {
+  job_id: string;
+  archived: boolean;
+};
+
+export type JobBulkClearResponse = {
+  archived_count: number;
 };
 
 export type ProjectEvent = {
@@ -90,8 +117,12 @@ export type TranslationSegment = {
   source_language: string | null;
   target_language: string;
   source_text: string | null;
+  faithful_text: string | null;
+  adapted_text: string | null;
   translated_text: string;
   provider: string | null;
+  duration_target_ms: number | null;
+  semantic_similarity_score: number | null;
   status: string;
   metadata_json: Record<string, unknown>;
   created_at: string;
@@ -192,6 +223,7 @@ export type VoiceProfile = {
   source_speaker_label: string | null;
   sample_duration_ms: number | null;
   quality_score: number | null;
+  average_similarity_score: number | null;
   is_shared: boolean;
   status: string;
   metadata_json: Record<string, unknown>;
@@ -215,6 +247,31 @@ export type ProjectDetail = ProjectListItem & {
 export type TimelineResponse = {
   project_id: string;
   clips: TimelineClip[];
+};
+
+export type ProviderStatusItem = {
+  capability: string;
+  provider: string;
+  is_mock: boolean;
+};
+
+export type ProviderStatusResponse = {
+  allow_mock_providers: boolean;
+  has_mock_provider: boolean;
+  providers: ProviderStatusItem[];
+  warning: string | null;
+};
+
+export type ProjectDurationReport = {
+  project_id: string;
+  max_timeline_end_ms: number | null;
+  active_providers: ProviderStatusResponse;
+  artifacts: {
+    artifact_id: string;
+    artifact_type: string;
+    duration_ms: number | null;
+    storage_path: string;
+  }[];
 };
 
 export type ApiErrorResponse = {

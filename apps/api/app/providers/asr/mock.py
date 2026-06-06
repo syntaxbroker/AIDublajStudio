@@ -4,9 +4,12 @@ from app.providers.asr.base import ASRProvider
 class MockASRProvider(ASRProvider):
     async def transcribe(self, *, source_path: str, language_code: str | None = None, **kwargs) -> dict:
         del kwargs
+        requested_language = language_code or "auto"
         return {
             "provider": "mock",
-            "language_code": language_code or "en",
+            "requested_language": requested_language,
+            "language_code": "en" if requested_language == "auto" else requested_language,
+            "language_probability": 1.0,
             "segments": [
                 {
                     "segment_index": 0,

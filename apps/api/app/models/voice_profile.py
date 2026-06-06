@@ -23,6 +23,7 @@ class VoiceProfile(Base):
     source_speaker_label: Mapped[str | None] = mapped_column(String(64))
     sample_duration_ms: Mapped[int | None] = mapped_column(Integer)
     quality_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    average_similarity_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     is_shared: Mapped[bool] = mapped_column(Boolean, server_default=sql_text("true"))
     status: Mapped[str] = mapped_column(String(32), server_default="ready")
     metadata_json: Mapped[dict] = mapped_column(JSONB, server_default=sql_text("'{}'::jsonb"))

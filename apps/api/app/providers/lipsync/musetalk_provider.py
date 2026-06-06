@@ -22,13 +22,26 @@ class MuseTalkProvider(LipSyncProvider):
 
         endpoint = f"{self.settings.musetalk_service_url.rstrip('/')}/render"
         model_name = self.settings.musetalk_model_name
+        render_config = {
+            "model_name": model_name,
+            "face_mode": self.settings.musetalk_face_mode,
+            "fps": self.settings.musetalk_fps or "",
+            "resolution": self.settings.musetalk_resolution,
+            "batch_size": str(self.settings.musetalk_batch_size),
+            "pad_mode": self.settings.musetalk_pad_mode,
+            "use_source_fps": "true" if self.settings.musetalk_use_source_fps else "false",
+            "quality_preset": self.settings.musetalk_quality_preset,
+            "chunk_mode": self.settings.musetalk_chunk_mode,
+            "chunk_seconds": str(self.settings.musetalk_chunk_seconds),
+            "chunk_overlap_ms": str(self.settings.musetalk_chunk_overlap_ms),
+        }
 
         try:
             async with httpx.AsyncClient(timeout=self.settings.musetalk_service_timeout_seconds) as client:
                 with video_path.open("rb") as video_handle, audio_path.open("rb") as audio_handle:
                     response = await client.post(
                         endpoint,
-                        data={"model_name": model_name},
+                        data=render_config,
                         files={
                             "video": (video_path.name, video_handle, "video/mp4"),
                             "audio": (audio_path.name, audio_handle, "audio/wav"),
@@ -62,6 +75,18 @@ class MuseTalkProvider(LipSyncProvider):
             "model_name": payload.get("model_name") or model_name,
             "source": "musetalk_service",
             "service_metadata": payload.get("metadata_json") or {},
+            "quality_preset": self.settings.musetalk_quality_preset,
+            "requested_config": {
+                "face_mode": self.settings.musetalk_face_mode,
+                "fps": self.settings.musetalk_fps,
+                "resolution": self.settings.musetalk_resolution,
+                "batch_size": self.settings.musetalk_batch_size,
+                "pad_mode": self.settings.musetalk_pad_mode,
+                "use_source_fps": self.settings.musetalk_use_source_fps,
+                "chunk_mode": self.settings.musetalk_chunk_mode,
+                "chunk_seconds": self.settings.musetalk_chunk_seconds,
+                "chunk_overlap_ms": self.settings.musetalk_chunk_overlap_ms,
+            },
         }
 
     def _extract_error_message(self, response: httpx.Response) -> str:

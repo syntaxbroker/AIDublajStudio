@@ -2,8 +2,14 @@ import type {
   ApiErrorResponse,
   Character,
   DubSegment,
+  JobBulkClearResponse,
+  JobClearResponse,
+  JobLogs,
+  JobRetryResponse,
+  ProjectDurationReport,
   ProjectDetail,
   ProjectListItem,
+  ProviderStatusResponse,
   TimelineResponse,
   TokenResponse,
   User,
@@ -11,6 +17,7 @@ import type {
 } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
+const UI_PROCESSING_HEADERS = { "X-AIDublaj-Client": "web" };
 
 export class ApiError extends Error {
   code: string;
@@ -100,6 +107,14 @@ export function getTimeline(token: string, projectId: string): Promise<TimelineR
   return request<TimelineResponse>(`/projects/${projectId}/timeline`, {}, token);
 }
 
+export function getProviderStatus(token?: string | null): Promise<ProviderStatusResponse> {
+  return request<ProviderStatusResponse>("/runtime/providers", {}, token);
+}
+
+export function getProjectDurationReport(token: string, projectId: string): Promise<ProjectDurationReport> {
+  return request<ProjectDurationReport>(`/projects/${projectId}/diagnostics/durations`, {}, token);
+}
+
 export function uploadProjectVideo(token: string, projectId: string, file: File): Promise<ProjectDetail> {
   const formData = new FormData();
   formData.append("file", file);
@@ -107,6 +122,7 @@ export function uploadProjectVideo(token: string, projectId: string, file: File)
     `/projects/${projectId}/upload`,
     {
       method: "POST",
+      headers: UI_PROCESSING_HEADERS,
       body: formData,
     },
     token,
@@ -168,6 +184,7 @@ export function extractCharacterVoiceSample(
     `/projects/${projectId}/characters/${characterId}/voice-sample`,
     {
       method: "POST",
+      headers: UI_PROCESSING_HEADERS,
     },
     token,
   );
@@ -182,6 +199,7 @@ export function createClonedVoiceProfileFromSample(
     `/projects/${projectId}/characters/${characterId}/voice-profile/from-sample`,
     {
       method: "POST",
+      headers: UI_PROCESSING_HEADERS,
     },
     token,
   );
@@ -215,6 +233,7 @@ export function startTts(token: string, projectId: string): Promise<ProjectDetai
     `/projects/${projectId}/tts`,
     {
       method: "POST",
+      headers: UI_PROCESSING_HEADERS,
     },
     token,
   );
@@ -225,6 +244,18 @@ export function startAudioMix(token: string, projectId: string): Promise<Project
     `/projects/${projectId}/audio-mix`,
     {
       method: "POST",
+      headers: UI_PROCESSING_HEADERS,
+    },
+    token,
+  );
+}
+
+export function startLipSync(token: string, projectId: string): Promise<ProjectDetail> {
+  return request<ProjectDetail>(
+    `/projects/${projectId}/lip-sync`,
+    {
+      method: "POST",
+      headers: UI_PROCESSING_HEADERS,
     },
     token,
   );
@@ -235,6 +266,30 @@ export function startRender(token: string, projectId: string): Promise<ProjectDe
     `/projects/${projectId}/render`,
     {
       method: "POST",
+      headers: UI_PROCESSING_HEADERS,
+    },
+    token,
+  );
+}
+
+export function getJobLogs(token: string, jobId: string): Promise<JobLogs> {
+  return request<JobLogs>(`/jobs/${jobId}/logs`, {}, token);
+}
+
+export function retryJob(token: string, jobId: string): Promise<JobRetryResponse> {
+  return request<JobRetryResponse>(`/jobs/${jobId}/retry`, { method: "POST" }, token);
+}
+
+export function clearJob(token: string, jobId: string): Promise<JobClearResponse> {
+  return request<JobClearResponse>(`/jobs/${jobId}/clear`, { method: "POST" }, token);
+}
+
+export function bulkClearJobs(token: string, projectId: string, state: string): Promise<JobBulkClearResponse> {
+  return request<JobBulkClearResponse>(
+    "/jobs/clear",
+    {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId, state }),
     },
     token,
   );

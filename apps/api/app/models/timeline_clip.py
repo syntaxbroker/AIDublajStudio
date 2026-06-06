@@ -36,3 +36,17 @@ class TimelineClip(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=sql_text("now()"))
 
     project = relationship("Project", back_populates="timeline_clips")
+
+    @property
+    def source_duration_ms(self) -> int:
+        return max(int(self.end_ms or 0) - int(self.start_ms or 0), 0)
+
+    @property
+    def translated_duration_ms(self) -> int | None:
+        value = (self.metadata_json or {}).get("translated_duration_ms")
+        return int(value) if value is not None else None
+
+    @property
+    def duration_match_score(self) -> float | None:
+        value = (self.metadata_json or {}).get("duration_match_score")
+        return float(value) if value is not None else None

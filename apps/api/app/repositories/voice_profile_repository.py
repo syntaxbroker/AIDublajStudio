@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.models.voice_profile import CharacterVoiceAssignment, VoiceProfile
@@ -44,7 +44,10 @@ class VoiceProfileRepository:
                 VoiceProfile.language == language,
                 VoiceProfile.is_shared.is_(True),
             )
-            .order_by(VoiceProfile.created_at.asc())
+            .order_by(
+                case((VoiceProfile.gender == "male", 0), else_=1),
+                VoiceProfile.created_at.asc(),
+            )
             .limit(1)
         )
         return self.db.scalar(stmt)
@@ -56,7 +59,10 @@ class VoiceProfileRepository:
                 VoiceProfile.language == language,
                 VoiceProfile.is_shared.is_(True),
             )
-            .order_by(VoiceProfile.created_at.asc())
+            .order_by(
+                case((VoiceProfile.gender == "male", 0), else_=1),
+                VoiceProfile.created_at.asc(),
+            )
             .limit(1)
         )
         return self.db.scalar(stmt)

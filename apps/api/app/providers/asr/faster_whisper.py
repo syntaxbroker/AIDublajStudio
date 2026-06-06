@@ -15,8 +15,9 @@ class FasterWhisperASRProvider(ASRProvider):
         return await asyncio.to_thread(self._transcribe_sync, source_path, language_code)
 
     def _transcribe_sync(self, source_path: str, language_code: str | None) -> dict:
-        resolved_language = None if (language_code or "auto") == "auto" else language_code
-        model = self._create_model()
+        requested_language = (language_code or "auto").strip().lower()
+        resolved_language = None if requested_language == "auto" else requested_language
+        model, device, compute_type = self._create_model()
         segments, info = model.transcribe(
             audio=str(Path(source_path)),
             language=resolved_language,
@@ -25,8 +26,11 @@ class FasterWhisperASRProvider(ASRProvider):
         normalized_segments = [self._normalize_segment(index, segment) for index, segment in enumerate(segments)]
         return {
             "provider": "faster_whisper",
+            "requested_language": requested_language,
             "language_code": info.language,
             "language_probability": getattr(info, "language_probability", None),
+            "device": device,
+            "compute_type": compute_type,
             "segments": normalized_segments,
         }
 
@@ -35,16 +39,11 @@ class FasterWhisperASRProvider(ASRProvider):
 
         preferred_device = self._preferred_device()
         preferred_compute_type = self._preferred_compute_type(preferred_device)
-        try:
-            return WhisperModel(self.settings.asr_model_size, device=preferred_device, compute_type=preferred_compute_type)
-        except Exception:
-            if preferred_device == "cpu":
-                raise
-            return WhisperModel(
-                self.settings.asr_model_size,
-                device="cpu",
-                compute_type=self._preferred_compute_type("cpu"),
-            )
+        return (
+            WhisperModel(self.settings.asr_model_size, device=preferred_device, compute_type=preferred_compute_type),
+            preferred_device,
+            preferred_compute_type,
+        )
 
     def _preferred_device(self) -> str:
         if self.settings.asr_device != "auto":

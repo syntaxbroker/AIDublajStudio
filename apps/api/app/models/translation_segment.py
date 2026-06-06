@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, text as sql_text
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,9 +20,12 @@ class TranslationSegment(Base):
     source_language: Mapped[str | None] = mapped_column(String(16))
     target_language: Mapped[str] = mapped_column(String(16), server_default="tr")
     source_text: Mapped[str | None] = mapped_column(Text)
+    faithful_text: Mapped[str | None] = mapped_column(Text)
+    adapted_text: Mapped[str | None] = mapped_column(Text)
     translated_text: Mapped[str] = mapped_column(Text)
     provider: Mapped[str | None] = mapped_column(String(64))
     duration_target_ms: Mapped[int | None] = mapped_column(Integer)
+    semantic_similarity_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     status: Mapped[SegmentStatus] = mapped_column(Enum(SegmentStatus, name="segment_status", create_type=False), server_default="DRAFT")
     metadata_json: Mapped[dict] = mapped_column(JSONB, server_default=sql_text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=sql_text("now()"))

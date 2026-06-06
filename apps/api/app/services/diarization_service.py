@@ -143,6 +143,12 @@ class DiarizationService:
                 "speaker_segment_count": len(created_segments),
                 "assigned_transcript_count": assigned_count,
                 "provider": result.get("provider", "mock"),
+                "device": result.get("device"),
+                "model_load_time_ms": result.get("model_load_time_ms"),
+                "inference_time_ms": result.get("inference_time_ms"),
+                "source_duration_ms": result.get("source_duration_ms"),
+                "prepared_duration_ms": result.get("prepared_duration_ms"),
+                "source_audio_padded_ms": result.get("source_audio_padded_ms"),
             }
             job.updated_at = datetime.now(UTC)
 

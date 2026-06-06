@@ -19,6 +19,7 @@ class DubSegmentResponse(BaseModel):
     provider: str | None
     status: SegmentStatus
     duration_ms: int | None
+    similarity_score: float | None = None
     metadata_json: dict
     created_at: datetime
     updated_at: datetime

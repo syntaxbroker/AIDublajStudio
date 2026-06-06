@@ -64,7 +64,7 @@ def test_sprint5_translation_layer_acceptance(client, auth_headers, db_conn, val
     jobs = {job["job_type"]: job for job in detail["jobs"]}
     assert jobs["TRANSLATE"]["state"] == "COMPLETED"
     assert jobs["TRANSLATE"]["output_json"]["translation_segment_count"] >= 1
-    assert jobs["TRANSLATE"]["output_json"]["provider"] == "mock"
+    assert jobs["TRANSLATE"]["output_json"]["provider"]
 
     transcript_segments = detail["transcript_segments"]
     translation_segments = detail["translation_segments"]
@@ -72,14 +72,30 @@ def test_sprint5_translation_layer_acceptance(client, auth_headers, db_conn, val
 
     assert len(transcript_segments) == len(translation_segments)
     first_translation = translation_segments[0]
-    assert first_translation["provider"] == "mock"
+    assert first_translation["provider"] == jobs["TRANSLATE"]["output_json"]["provider"]
     assert first_translation["source_text"]
+    assert first_translation["faithful_text"]
+    assert first_translation["adapted_text"]
     assert first_translation["translated_text"]
+    assert first_translation["translated_text"] == first_translation["adapted_text"]
+    assert first_translation["semantic_similarity_score"] is not None
+    assert first_translation["metadata_json"]["translation_stage"] == "faithful_then_dub_adaptation"
+    assert first_translation["metadata_json"]["semantic_similarity_score"] >= 0.72
     assert first_translation["target_language"] == "tr"
+    assert first_translation["duration_target_ms"] > 0
+    assert first_translation["metadata_json"]["source_duration_ms"] > 0
+    assert first_translation["metadata_json"]["translated_duration_ms"] > 0
+    assert 0 < first_translation["metadata_json"]["duration_match_score"] <= 1
 
     first_clip = timeline_clips[0]
     assert first_clip["translation_segment_id"] == first_translation["id"]
     assert first_clip["metadata_json"]["translated_text"]
+    assert first_clip["metadata_json"]["faithful_text"]
+    assert first_clip["metadata_json"]["adapted_text"]
+    assert first_clip["metadata_json"]["semantic_similarity_score"] >= 0.72
+    assert first_clip["source_duration_ms"] == first_clip["end_ms"] - first_clip["start_ms"]
+    assert first_clip["translated_duration_ms"] == first_translation["metadata_json"]["translated_duration_ms"]
+    assert first_clip["duration_match_score"] == first_translation["metadata_json"]["duration_match_score"]
 
     event_types = {event["event_type"] for event in detail["events"]}
     for event_type in TRANSLATION_EVENTS:
@@ -88,7 +104,8 @@ def test_sprint5_translation_layer_acceptance(client, auth_headers, db_conn, val
     with db_conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
-            select transcript_segment_id, source_language, target_language, source_text, translated_text, provider
+            select transcript_segment_id, source_language, target_language, source_text,
+                   faithful_text, adapted_text, translated_text, semantic_similarity_score, provider
             from translation_segments
             where project_id = %s
             order by created_at asc
@@ -97,8 +114,11 @@ def test_sprint5_translation_layer_acceptance(client, auth_headers, db_conn, val
         )
         rows = cur.fetchall()
         assert len(rows) == len(translation_segments)
-        assert rows[0]["provider"] == "mock"
+        assert rows[0]["provider"] == first_translation["provider"]
+        assert rows[0]["faithful_text"]
+        assert rows[0]["adapted_text"]
         assert rows[0]["translated_text"]
+        assert rows[0]["semantic_similarity_score"] is not None
 
 
 def test_sprint5_failed_translation_job_does_not_break_api(client, auth_headers, db_conn, valid_sample_video_file):

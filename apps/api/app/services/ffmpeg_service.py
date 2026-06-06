@@ -25,18 +25,22 @@ class FFmpegService:
             "-y",
             "-i",
             str(source_path),
-            "-vf",
-            "scale=-2:720:force_original_aspect_ratio=decrease",
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
             "-c:v",
             "libx264",
             "-preset",
             "veryfast",
             "-crf",
-            "23",
+            "18",
             "-c:a",
             "aac",
             "-b:a",
             "128k",
+            "-sn",
+            "-dn",
             str(output_path),
         ]
         subprocess.run(command, check=True, capture_output=True, text=True)
@@ -101,7 +105,8 @@ class FFmpegService:
         mix_inputs = ["[0:a]"]
         for index, segment in enumerate(segments, start=1):
             delay_ms = max(int(segment["start_ms"]), 0)
-            clip_duration_seconds = max(int(segment["clip_duration_ms"]), 1) / 1000
+            mix_duration_ms = segment.get("mix_duration_ms", segment["clip_duration_ms"])
+            clip_duration_seconds = max(int(mix_duration_ms), 1) / 1000
             label = f"s{index}"
             filter_parts.append(
                 f"[{index}:a]atrim=0:{clip_duration_seconds:.3f},adelay={delay_ms}|{delay_ms}[{label}]"
@@ -139,16 +144,10 @@ class FFmpegService:
             "0:v:0",
             "-map",
             "1:a:0",
-            "-vf",
-            "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
             "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "23",
-            "-pix_fmt",
-            "yuv420p",
+            "copy",
+            "-af",
+            "apad",
             "-c:a",
             "aac",
             "-ac",

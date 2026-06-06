@@ -29,6 +29,7 @@ class ProjectListItem(BaseModel):
     target_language: str
     status: str
     storage_key: str
+    metadata_json: dict = Field(default_factory=dict)
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
@@ -46,6 +47,7 @@ class ProjectEventResponse(BaseModel):
 
 
 class ProjectDetailResponse(ProjectListItem):
+    transcript_quality_score: float | None = None
     artifacts: list[ArtifactResponse] = Field(default_factory=list)
     jobs: list[JobResponse] = Field(default_factory=list)
     events: list[ProjectEventResponse] = Field(default_factory=list)

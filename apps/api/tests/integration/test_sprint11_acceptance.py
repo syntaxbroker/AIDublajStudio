@@ -72,6 +72,18 @@ def test_sprint11_audio_mix_acceptance(client, auth_headers, db_conn, storage_ro
 
         cur.execute(
             """
+            select max(duration_ms) as video_duration_ms
+            from artifacts
+            where project_id = %s
+            and artifact_type in ('SOURCE_VIDEO', 'PROXY_VIDEO')
+            and duration_ms is not null
+            """,
+            (project_id,),
+        )
+        video_duration_ms = int(cur.fetchone()["video_duration_ms"])
+
+        cur.execute(
+            """
             select duration_ms, storage_path, audio_channels, sample_rate
             from artifacts
             where id = %s
@@ -80,7 +92,8 @@ def test_sprint11_audio_mix_acceptance(client, auth_headers, db_conn, storage_ro
         )
         row = cur.fetchone()
         assert row["duration_ms"] is not None
-        assert abs(int(row["duration_ms"]) - timeline_end_ms) <= 100
+        assert int(row["duration_ms"]) >= timeline_end_ms
+        assert abs(int(row["duration_ms"]) - video_duration_ms) <= 100
         assert row["audio_channels"] == 1
         assert row["sample_rate"] == 22050
         assert (storage_root / row["storage_path"]).exists()

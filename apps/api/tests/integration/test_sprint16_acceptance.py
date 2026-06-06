@@ -3,7 +3,8 @@ from pathlib import Path
 from psycopg.rows import dict_row
 
 from tests.integration.test_sprint10_acceptance import wait_for_tts_ready
-from tests.integration.test_sprint7_acceptance import create_project, upload_video, wait_for_pipeline_ready
+from tests.integration.test_sprint6_acceptance import wait_for_diarization_ready
+from tests.integration.test_sprint7_acceptance import create_project, upload_video
 
 
 def test_sprint16_voice_profile_acceptance(client, auth_headers, db_conn, valid_sample_video_file: Path):
@@ -16,7 +17,7 @@ def test_sprint16_voice_profile_acceptance(client, auth_headers, db_conn, valid_
     project = create_project(client, auth_headers, name="Sprint 16 Acceptance Project")
     project_id = project["id"]
     upload_video(client, auth_headers, project_id, valid_sample_video_file)
-    wait_for_pipeline_ready(client, auth_headers, project_id)
+    wait_for_diarization_ready(client, auth_headers, project_id)
 
     characters_response = client.post(f"/projects/{project_id}/characters/from-speakers", headers=auth_headers)
     assert characters_response.status_code == 200, characters_response.text
@@ -122,7 +123,7 @@ def test_sprint16_invalid_voice_profile_returns_404(client, auth_headers, valid_
     project = create_project(client, auth_headers, name="Sprint 16 Invalid Voice Profile")
     project_id = project["id"]
     upload_video(client, auth_headers, project_id, valid_sample_video_file)
-    wait_for_pipeline_ready(client, auth_headers, project_id)
+    wait_for_diarization_ready(client, auth_headers, project_id)
 
     characters_response = client.post(f"/projects/{project_id}/characters/from-speakers", headers=auth_headers)
     assert characters_response.status_code == 200, characters_response.text

@@ -1,5 +1,7 @@
 import os
 import time
+import logging
+from datetime import UTC, datetime
 
 from app.db.session import SessionLocal
 from app.core.enums import JobType
@@ -16,6 +18,9 @@ QUEUE_NAME = "media"
 WORKER_NAME = os.getenv("WORKER_NAME", "worker-media")
 POLL_SECONDS = float(os.getenv("MEDIA_WORKER_POLL_SECONDS", "2"))
 
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("worker-media")
+
 
 def run() -> None:
     with SessionLocal() as db:
@@ -26,6 +31,15 @@ def run() -> None:
             with SessionLocal() as db:
                 job = JobRepository(db).get_next_queued_job(QUEUE_NAME)
                 if job:
+                    logger.info(
+                        "Dispatching media job",
+                        extra={
+                            "job_id": job.id,
+                            "job_type": job.job_type.value,
+                            "queue_name": job.queue_name,
+                            "dispatch_time": datetime.now(UTC).isoformat(),
+                        },
+                    )
                     if job.job_type == JobType.AUDIO_MIX:
                         AudioMixService(db).process_job(job.id, WORKER_NAME)
                     elif job.job_type == JobType.LIP_SYNC:

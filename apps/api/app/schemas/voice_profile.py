@@ -19,6 +19,7 @@ class VoiceProfileResponse(BaseModel):
     source_speaker_label: str | None
     sample_duration_ms: int | None
     quality_score: float | None
+    average_similarity_score: float | None = None
     is_shared: bool
     status: str
     metadata_json: dict
@@ -39,6 +40,7 @@ class VoiceProfileCreateRequest(BaseModel):
     source_speaker_label: str | None = Field(default=None, max_length=64)
     sample_duration_ms: int | None = None
     quality_score: float | None = None
+    average_similarity_score: float | None = None
     is_shared: bool = True
     status: str = Field(default="ready", min_length=1, max_length=32)
     metadata_json: dict = Field(default_factory=dict)
@@ -55,6 +57,7 @@ class VoiceProfileUpdateRequest(BaseModel):
     source_speaker_label: str | None = Field(default=None, max_length=64)
     sample_duration_ms: int | None = None
     quality_score: float | None = None
+    average_similarity_score: float | None = None
     is_shared: bool | None = None
     status: str | None = Field(default=None, min_length=1, max_length=32)
     metadata_json: dict | None = None

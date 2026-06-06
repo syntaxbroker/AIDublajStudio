@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import enforce_ui_provider_safety, get_current_user
 from app.core.openapi import COMMON_ERROR_RESPONSES
 from app.core.errors import AppError
 from app.db.session import get_db
@@ -51,6 +51,7 @@ def get_project(
 @router.post("/{project_id}/translate", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
 def translate_project(
     project_id: str,
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:
@@ -64,6 +65,7 @@ def translate_project(
 @router.post("/{project_id}/tts", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
 def tts_project(
     project_id: str,
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:
@@ -77,6 +79,7 @@ def tts_project(
 @router.post("/{project_id}/audio-mix", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
 def audio_mix_project(
     project_id: str,
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:
@@ -90,6 +93,7 @@ def audio_mix_project(
 @router.post("/{project_id}/render", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
 def render_project(
     project_id: str,
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:
@@ -103,6 +107,7 @@ def render_project(
 @router.post("/{project_id}/lip-sync", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
 def lip_sync_project(
     project_id: str,
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:
@@ -116,6 +121,7 @@ def lip_sync_project(
 @router.post("/{project_id}/diarize", response_model=ProjectDetailResponse, responses=COMMON_ERROR_RESPONSES)
 def diarize_project(
     project_id: str,
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:
@@ -194,6 +200,7 @@ def assign_voice_profile_to_character(
 def extract_character_voice_sample(
     project_id: str,
     character_id: str,
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:
@@ -212,6 +219,7 @@ def extract_character_voice_sample(
 def create_voice_profile_from_sample(
     project_id: str,
     character_id: str,
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:

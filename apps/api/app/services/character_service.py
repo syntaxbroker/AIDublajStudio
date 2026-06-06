@@ -3,12 +3,15 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.enums import EventType
 from app.core.errors import AppError
 from app.core.uuid7 import uuid7
 from app.models.character import Character, CharacterAssignment
+from app.models.voice_profile import CharacterVoiceAssignment
 from app.repositories.character_repository import CharacterRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.voice_profile_repository import VoiceProfileRepository
 from app.schemas.character import CharacterRenameRequest
 from app.services.event_service import EventService
 
@@ -18,7 +21,9 @@ class CharacterService:
         self.db = db
         self.projects = ProjectRepository(db)
         self.characters = CharacterRepository(db)
+        self.voice_profiles = VoiceProfileRepository(db)
         self.events = EventService(db)
+        self.settings = get_settings()
 
     def create_from_speakers(self, project_id: str, current_user_id: str) -> None:
         project = self.projects.get_by_id(project_id)
@@ -72,12 +77,42 @@ class CharacterService:
                 )
             )
 
+        default_voice_profile = self._default_voice_profile_for_project(project)
+        assigned_voice_character_ids: set[str] = set()
         for clip in self.characters.list_timeline_clips_for_project(project_id):
             if not clip.speaker_label:
                 continue
             character = speaker_to_character.get(clip.speaker_label)
             if not character:
                 continue
+            if (
+                default_voice_profile
+                and character.id not in assigned_voice_character_ids
+                and not self.voice_profiles.get_assignment(project_id, character.id)
+            ):
+                self.voice_profiles.create_assignment(
+                    CharacterVoiceAssignment(
+                        id=str(uuid7()),
+                        project_id=project_id,
+                        character_id=character.id,
+                        voice_profile_id=default_voice_profile.id,
+                        assignment_source="auto_from_speaker_default",
+                    )
+                )
+                self.events.publish_audit(
+                    project_id=project_id,
+                    actor_user_id=current_user_id,
+                    entity_type="character",
+                    entity_id=character.id,
+                    event_type=EventType.VOICE_PROFILE_ASSIGNED_TO_CHARACTER.value,
+                    payload_json={
+                        "voice_profile_id": default_voice_profile.id,
+                        "voice_id": default_voice_profile.voice_id,
+                        "assignment_source": "auto_from_speaker_default",
+                        "warning": "Fallback shared voice assigned because no cloned character voice exists yet.",
+                    },
+                )
+                assigned_voice_character_ids.add(character.id)
             clip.character_id = character.id
             clip.updated_at = datetime.now(UTC)
             metadata = dict(clip.metadata_json or {})
@@ -113,6 +148,13 @@ class CharacterService:
             )
 
         self.db.commit()
+
+    def _default_voice_profile_for_project(self, project):
+        language = project.target_language or project.source_language or self.settings.translation_target_language
+        profile = self.voice_profiles.get_default_for_language(self.settings.tts_provider, language)
+        if profile:
+            return profile
+        return self.voice_profiles.get_shared_for_language(language)
 
     def rename_character(self, project_id: str, character_id: str, payload: CharacterRenameRequest, current_user_id: str) -> None:
         project = self.projects.get_by_id(project_id)

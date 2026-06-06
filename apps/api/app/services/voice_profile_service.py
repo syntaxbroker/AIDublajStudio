@@ -18,6 +18,8 @@ from app.schemas.voice_profile import (
     VoiceProfileUpdateRequest,
 )
 from app.services.event_service import EventService
+from app.services.storage_service import StorageService
+from app.services.voice_similarity_service import VoiceSimilarityService
 
 
 class VoiceProfileService:
@@ -29,6 +31,8 @@ class VoiceProfileService:
         self.voice_profiles = VoiceProfileRepository(db)
         self.events = EventService(db)
         self.settings = get_settings()
+        self.storage = StorageService()
+        self.voice_similarity = VoiceSimilarityService()
 
     def list_profiles(self) -> list[VoiceProfileResponse]:
         return [VoiceProfileResponse.model_validate(item) for item in self.voice_profiles.list_profiles()]
@@ -53,6 +57,7 @@ class VoiceProfileService:
             source_speaker_label=payload.source_speaker_label,
             sample_duration_ms=payload.sample_duration_ms,
             quality_score=payload.quality_score,
+            average_similarity_score=payload.average_similarity_score,
             is_shared=payload.is_shared,
             status=payload.status,
             metadata_json=payload.metadata_json,
@@ -71,18 +76,29 @@ class VoiceProfileService:
         if not character or character.project_id != project_id:
             raise AppError("CHARACTER_NOT_FOUND", "Character not found", 404)
 
-        reference_artifact = next(
-            (
-                artifact
-                for artifact in self.artifacts.list_for_project(project_id)
-                if artifact.artifact_type.value == "VOICE_REFERENCE_AUDIO"
-                and str((artifact.metadata_json or {}).get("character_id") or "") == character_id
+        matching_references = [
+            artifact
+            for artifact in self.artifacts.list_for_project(project_id)
+            if artifact.artifact_type.value == "VOICE_REFERENCE_AUDIO"
+            and str((artifact.metadata_json or {}).get("character_id") or "") == character_id
+        ]
+        matching_references.sort(
+            key=lambda artifact: (
+                float((artifact.metadata_json or {}).get("sample_quality_score") or 0),
+                int(artifact.duration_ms or 0),
+                artifact.created_at,
             ),
-            None,
+            reverse=True,
         )
+        reference_artifact = matching_references[0] if matching_references else None
         if not reference_artifact:
             raise AppError("VOICE_REFERENCE_NOT_FOUND", "Voice reference audio not found for character", 409)
 
+        reference_metadata = reference_artifact.metadata_json or {}
+        reference_path = self.storage.absolute_path(reference_artifact.storage_path)
+        reference_analysis = self._validate_reference_audio(reference_artifact, reference_path)
+        sample_quality_score = reference_metadata.get("sample_quality_score")
+        character_display_name = (character.display_name or "").strip()
         profile = VoiceProfile(
             id=str(uuid7()),
             display_name=f"{character.display_name} Clone",
@@ -94,16 +110,33 @@ class VoiceProfileService:
             gender=None,
             reference_audio_artifact_id=reference_artifact.id,
             source_character_id=character.id,
-            source_speaker_label=str((reference_artifact.metadata_json or {}).get("speaker_label") or "") or None,
+            source_speaker_label=str(reference_metadata.get("speaker_label") or "") or None,
             sample_duration_ms=reference_artifact.duration_ms,
-            quality_score=None,
+            quality_score=float(sample_quality_score) if sample_quality_score is not None else None,
             is_shared=False,
             status="ready",
             metadata_json={
                 "reference_audio_artifact_id": reference_artifact.id,
                 "source_character_id": character.id,
-                "source_speaker_label": (reference_artifact.metadata_json or {}).get("speaker_label"),
-                "reference_text": (reference_artifact.metadata_json or {}).get("prompt_text"),
+                "character_display_name": character_display_name,
+                "source_speaker_label": reference_metadata.get("speaker_label"),
+                "reference_text": reference_metadata.get("prompt_text"),
+                "reference_language": reference_metadata.get("reference_language") or reference_metadata.get("source_language") or project.source_language,
+                "target_language": project.target_language,
+                "reference_duration_ms": reference_artifact.duration_ms,
+                "sample_quality_score": sample_quality_score,
+                "reference_audio_analysis": reference_analysis,
+                "clone_validation": {
+                    "status": "passed",
+                    "required_duration_ms": self.settings.voice_clone_required_duration_ms,
+                    "min_speech_ratio": self.settings.voice_clone_min_speech_ratio,
+                    "max_silence_ratio": self.settings.voice_clone_max_silence_ratio,
+                    "min_snr_db": self.settings.voice_clone_min_snr_db,
+                    "min_quality_score": self.settings.voice_clone_min_quality_score,
+                },
+                "normalized": bool(reference_metadata.get("normalized")),
+                "silence_trimmed": bool(reference_metadata.get("silence_trimmed")),
+                "warning": reference_metadata.get("warning"),
             },
         )
         self.voice_profiles.create_profile(profile)
@@ -121,6 +154,34 @@ class VoiceProfileService:
         self._upsert_assignment(project_id, character.id, profile, current_user_id, assignment_source="manual")
         self.db.commit()
         return profile
+
+    def _validate_reference_audio(self, reference_artifact, reference_path) -> dict:
+        if not reference_path.exists():
+            raise AppError("VOICE_REFERENCE_FILE_NOT_FOUND", "Voice reference file not found", 404)
+        analysis = self.voice_similarity.analyze(reference_path)
+        duration_ms = int(reference_artifact.duration_ms or (analysis["duration_seconds"] * 1000))
+        quality_score = float((reference_artifact.metadata_json or {}).get("sample_quality_score") or 0)
+        failures: list[str] = []
+        if duration_ms < self.settings.voice_clone_required_duration_ms:
+            failures.append("duration")
+        if float(analysis["speech_ratio"]) < self.settings.voice_clone_min_speech_ratio:
+            failures.append("speech_ratio")
+        if float(analysis["silence_ratio"]) > self.settings.voice_clone_max_silence_ratio:
+            failures.append("silence_ratio")
+        if float(analysis["snr_estimate"]) < self.settings.voice_clone_min_snr_db:
+            failures.append("snr")
+        if quality_score < self.settings.voice_clone_min_quality_score:
+            failures.append("quality_score")
+        if failures:
+            raise AppError(
+                "VOICE_REFERENCE_QUALITY_TOO_LOW",
+                (
+                    "Voice sample too short or too noisy. Please upload at least 20 seconds "
+                    "of clean speech with limited silence."
+                ),
+                409,
+            )
+        return analysis
 
     def update_profile(
         self,
@@ -153,6 +214,8 @@ class VoiceProfileService:
             profile.sample_duration_ms = payload.sample_duration_ms
         if "quality_score" in payload.model_fields_set:
             profile.quality_score = payload.quality_score
+        if "average_similarity_score" in payload.model_fields_set:
+            profile.average_similarity_score = payload.average_similarity_score
         if payload.is_shared is not None:
             profile.is_shared = payload.is_shared
         if payload.status is not None:

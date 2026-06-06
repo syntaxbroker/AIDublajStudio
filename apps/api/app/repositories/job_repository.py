@@ -36,3 +36,7 @@ class JobRepository:
     def list_processing_by_queue(self, queue_name: str) -> list[Job]:
         stmt = select(Job).where(Job.queue_name == queue_name, Job.state == JobState.PROCESSING)
         return list(self.db.scalars(stmt))
+
+    def list_attempts_for_job(self, job_id: str) -> list[JobAttempt]:
+        stmt = select(JobAttempt).where(JobAttempt.job_id == job_id).order_by(JobAttempt.created_at.asc())
+        return list(self.db.scalars(stmt))

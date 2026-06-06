@@ -24,6 +24,7 @@ from app.schemas.translation import TranslationSegmentResponse
 from app.schemas.transcript import TranscriptSegmentResponse
 from app.schemas.voice_profile import VoiceProfileResponse
 from app.services.event_service import EventService
+from app.services.transcript_quality_service import TranscriptQualityService
 
 
 class ProjectService:
@@ -39,6 +40,7 @@ class ProjectService:
         self.translations = TranslationRepository(db)
         self.voice_profiles = VoiceProfileRepository(db)
         self.event_service = EventService(db)
+        self.transcript_quality = TranscriptQualityService()
 
     def list_for_user(self, user_id: str) -> list[ProjectListItem]:
         return [ProjectListItem.model_validate(item) for item in self.projects.list_for_user(user_id)]
@@ -108,6 +110,7 @@ class ProjectService:
 
         return ProjectDetailResponse(
             **ProjectListItem.model_validate(project).model_dump(),
+            transcript_quality_score=self.transcript_quality.score(project.transcript_segments),
             artifacts=[
                 ArtifactResponse(
                     **ArtifactResponse.model_validate(item).model_dump(exclude={"parent_artifact_ids"}),
@@ -115,7 +118,11 @@ class ProjectService:
                 )
                 for item in project.artifacts
             ],
-            jobs=[JobResponse.model_validate(item) for item in project.jobs],
+            jobs=[
+                JobResponse.model_validate(item)
+                for item in project.jobs
+                if not (item.output_json or {}).get("archived")
+            ],
             events=[ProjectEventResponse.model_validate(item) for item in project.events],
             characters=character_responses,
             character_assignments=[CharacterAssignmentResponse.model_validate(item) for item in project.character_assignments],

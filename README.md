@@ -56,6 +56,111 @@ Henüz bilinçli olarak yapılmayanlar:
 - API: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
 - DB: [http://localhost:8000/api/v1/health/db](http://localhost:8000/api/v1/health/db)
 - Redis: [http://localhost:8000/api/v1/health/redis](http://localhost:8000/api/v1/health/redis)
+- Provider status: [http://localhost:8000/api/v1/runtime/providers](http://localhost:8000/api/v1/runtime/providers)
+
+## Provider Safety
+
+Mock provider'lar yalnizca otomatik test ve hizli smoke kosulari icindir. Mock ASR sahte 3 segmentlik timeline uretebilir; Mock TTS konusma yerine sine-wave bip sesi uretir. Bu nedenle mock provider ile uretilen video urun kalitesi kabul ciktisi sayilmaz.
+
+Web UI gercek kullanici islemlerinde mock provider'lari sessizce kullanmaz. `ASR_PROVIDER`, `TRANSLATION_PROVIDER`, `TTS_PROVIDER`, `VOICE_CLONE_PROVIDER` veya `LIP_SYNC_PROVIDER` degerlerinden herhangi biri `mock` ise UI'da provider banner'i gorunur ve processing cagirilari `ALLOW_MOCK_PROVIDERS=true` acik degilse bloke edilir.
+
+Test-only mock calistirma:
+
+```powershell
+$env:ALLOW_MOCK_PROVIDERS = "true"
+$env:ASR_PROVIDER = "mock"
+$env:TRANSLATION_PROVIDER = "mock"
+$env:TTS_PROVIDER = "mock"
+$env:VOICE_CLONE_PROVIDER = "mock"
+$env:LIP_SYNC_PROVIDER = "mock"
+docker compose --profile app up -d --build
+```
+
+Gercek local demo icin onerilen provider seti:
+
+```powershell
+$env:ALLOW_MOCK_PROVIDERS = "false"
+$env:ASR_PROVIDER = "faster_whisper"
+$env:TRANSLATION_PROVIDER = "ollama" # veya openai
+$env:TTS_PROVIDER = "edge_tts" # cloned voice akisi icin voice clone profili kullanin
+$env:VOICE_CLONE_PROVIDER = "cosyvoice"
+$env:LIP_SYNC_PROVIDER = "musetalk"
+$env:COSYVOICE_SERVICE_URL = "http://cosyvoice-service:8010"
+$env:MUSETALK_SERVICE_URL = "http://musetalk-service:8020"
+docker compose --profile app --profile cosyvoice --profile musetalk up -d --build
+```
+
+Proje sure diagnostics raporu:
+
+- `GET /api/v1/projects/{project_id}/diagnostics/durations`
+- SOURCE_VIDEO, PROXY_VIDEO, FINAL_DUB_AUDIO, LIPSYNC_VIDEO, FINAL_RENDER surelerini, max timeline end_ms degerini ve active provider listesini dondurur.
+
+## MuseTalk Quality Presets
+
+Sprint 50 itibariyle varsayilan politika kaynak cozunurlugunu korumaktir:
+
+```powershell
+$env:MUSETALK_QUALITY_PRESET = "source-native"
+$env:MUSETALK_USE_SOURCE_FPS = "true"
+$env:MUSETALK_RESOLUTION = "source"
+$env:MUSETALK_PAD_MODE = "clone"
+$env:MUSETALK_BATCH_SIZE = "2"
+```
+
+Bu preset kaynak videonun fps ve cozunurluk degerlerini korur. Pipeline artik kaynak videoyu sessizce 720p/1080p'ye dusurmemelidir; `LIPSYNC_VIDEO` veya `FINAL_RENDER` kaynak cozunurlugunden dusukse job fail-fast davranir ve metadata'da resolution preservation hatasi gorunur. Daha dusuk calisma cozunurlugu sadece bilerek yapilan deneysel bir override olarak kullanilmalidir, production default degildir.
+
+- `MUSETALK_QUALITY_PRESET=current`, `MUSETALK_USE_SOURCE_FPS=false`, `MUSETALK_RESOLUTION=source`
+- Deneysel downscale override: `MUSETALK_RESOLUTION=720p` veya `1080p`. Bu ayarlar input=output resolution politikasini bozdugu icin release kabulunde kullanilmamalidir.
+
+Her `LIPSYNC_VIDEO` artifact metadata'si provider, mock durumu, fps, resolution, source_resolution, lipsync_resolution, resolution_preserved, processing_time_ms, source_video_artifact_id, audio_artifact_id ve quality_preset alanlarini tasir.
+
+## Product Evaluation
+
+Sprint 29 product evaluation yeni AI ozelligi eklemez; 10 gercek videoyu mevcut real-provider zincirinden gecirip teknik metrik ve bos insan degerlendirme alanlariyla JSON raporu uretir.
+
+Gerekli provider seti:
+
+```powershell
+$env:ALLOW_MOCK_PROVIDERS = "false"
+$env:ASR_PROVIDER = "faster_whisper"
+$env:TRANSLATION_PROVIDER = "ollama"
+$env:DIARIZATION_PROVIDER = "pyannote"
+$env:VOICE_CLONE_PROVIDER = "cosyvoice"
+$env:TTS_PROVIDER = "cosyvoice"
+$env:LIP_SYNC_PROVIDER = "musetalk"
+```
+
+Input manifest yolu:
+
+- `storage/tmp/sprint29_inputs/manifest.json`
+
+Manifest ornegi:
+
+```json
+{
+  "videos": [
+    {
+      "name": "news_sample_01",
+      "category": "haber videosu",
+      "source_language": "sr",
+      "target_language": "tr",
+      "path": "news_sample_01.mp4"
+    }
+  ]
+}
+```
+
+Calistirma:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\infra\scripts\run_sprint29_product_evaluation.ps1
+```
+
+Cikti:
+
+- `storage/tmp/sprint29_product_evaluation.json`
+
+Script manifestte en az 10 video yoksa veya herhangi bir provider mock ise PASS uretmez.
 
 ## Fresh Clone Test
 

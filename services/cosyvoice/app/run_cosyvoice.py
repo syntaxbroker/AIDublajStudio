@@ -80,6 +80,7 @@ def main() -> int:
 
     generators = None
     if reference_text:
+        inference_mode = "zero_shot"
         generators = cosyvoice.inference_zero_shot(
             text,
             reference_text,
@@ -87,6 +88,7 @@ def main() -> int:
             stream=False,
         )
     else:
+        inference_mode = "cross_lingual"
         generators = cosyvoice.inference_cross_lingual(
             text,
             str(reference_audio),
@@ -114,6 +116,7 @@ def main() -> int:
             f"\"model_name\": \"{args.model_name}\", "
             f"\"voice_profile_id\": \"{args.voice_profile_id}\", "
             f"\"reference_text_used\": {str(bool(reference_text)).lower()}, "
+            f"\"cosyvoice_mode\": \"{inference_mode}\", "
             f"\"sample_rate\": {int(cosyvoice.sample_rate)}"
             "}"
         ),

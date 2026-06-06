@@ -41,6 +41,7 @@ class CosyVoiceProvider(VoiceCloneProvider):
         endpoint = f"{self.settings.cosyvoice_service_url.rstrip('/')}/synthesize"
         model_name = kwargs.get("model_name") or self.settings.cosyvoice_model_name
         reference_text = (kwargs.get("reference_text") or "").strip()
+        cosyvoice_mode = kwargs.get("cosyvoice_mode") or ("zero_shot" if reference_text else "cross_lingual")
 
         try:
             async with httpx.AsyncClient(timeout=self.settings.cosyvoice_service_timeout_seconds) as client:
@@ -83,10 +84,12 @@ class CosyVoiceProvider(VoiceCloneProvider):
             duration_ms = int(payload.get("duration_ms") or duration_ms)
             sample_rate = int(payload.get("sample_rate") or sample_rate)
             response_model_name = payload.get("model_name") or response_model_name
+            response_metadata = payload.get("metadata_json") if isinstance(payload.get("metadata_json"), dict) else {}
         else:
             audio_bytes = response.content
             if not audio_bytes:
                 raise AppError("COSYVOICE_OUTPUT_MISSING", "CosyVoice service did not return an audio file", 502)
+            response_metadata = {}
 
         return {
             "provider": "cosyvoice",
@@ -95,6 +98,7 @@ class CosyVoiceProvider(VoiceCloneProvider):
             "file_extension": ".wav",
             "duration_ms": duration_ms,
             "metadata_json": {
+                **response_metadata,
                 "cloned": True,
                 "language_code": language_code or "tr",
                 "model_name": response_model_name,
@@ -102,6 +106,10 @@ class CosyVoiceProvider(VoiceCloneProvider):
                 "sample_rate": sample_rate,
                 "source": "cosyvoice_service",
                 "voice_profile_id": voice_profile_id,
+                "reference_language": kwargs.get("reference_language"),
+                "target_language": kwargs.get("target_language") or language_code or "tr",
+                "reference_text_used": bool(reference_text),
+                "cosyvoice_mode": cosyvoice_mode,
             },
         }
 

@@ -68,10 +68,20 @@ def default_command_template() -> str | None:
         f"--repo-dir {repo_dir} "
         f"--model-dir {model_dir} "
         f"--device {device} "
-        f"--video {{video}} "
-        f"--audio {{audio}} "
-        f"--output-video {{output_video}} "
-        f"--model-name {{model_name}}"
+        f"--video \"{{video}}\" "
+        f"--audio \"{{audio}}\" "
+        f"--output-video \"{{output_video}}\" "
+        f"--model-name \"{{model_name}}\" "
+        f"--face-mode \"{{face_mode}}\" "
+        f"--target-fps \"{{fps}}\" "
+        f"--resolution \"{{resolution}}\" "
+        f"--batch-size \"{{batch_size}}\" "
+        f"--pad-mode \"{{pad_mode}}\" "
+        f"--use-source-fps \"{{use_source_fps}}\" "
+        f"--quality-preset \"{{quality_preset}}\" "
+        f"--chunk-mode \"{{chunk_mode}}\" "
+        f"--chunk-seconds \"{{chunk_seconds}}\" "
+        f"--chunk-overlap-ms \"{{chunk_overlap_ms}}\""
     )
 
 
@@ -202,21 +212,52 @@ def get_landmark_and_bbox(img_list, upperbondrange=0):
     batch_size_fa = 1
     batches = [frames[i:i + batch_size_fa] for i in range(0, len(frames), batch_size_fa)]
     coords_list = []
+    raw_missing_indices = []
     print("get face bounding boxes with the default value")
+    frame_index = 0
     for fb in tqdm(batches):
         bbox = fa.get_detections_for_batch(np.asarray(fb))
         for f in bbox:
             if f is None:
                 coords_list.append(coord_placeholder)
+                raw_missing_indices.append(frame_index)
+                frame_index += 1
                 continue
             x1, y1, x2, y2 = [int(value) for value in f]
             x1 = max(0, x1)
             y1 = max(0, y1)
             coords_list.append((x1, y1, x2, y2))
+            frame_index += 1
+    coords_list = fill_missing_bboxes(coords_list)
     print("********************************************bbox_shift parameter adjustment**********************************************************")
     print(f"Total frame: {len(frames)} Using detector bounding boxes")
+    print(f"Missing face detections filled: {len(raw_missing_indices)}")
     print("*************************************************************************************************************************************")
     return coords_list, frames
+
+
+def fill_missing_bboxes(coords_list):
+    valid = [index for index, coord in enumerate(coords_list) if coord != coord_placeholder]
+    if not valid:
+        return coords_list
+    filled = list(coords_list)
+    for index, coord in enumerate(filled):
+        if coord != coord_placeholder:
+            continue
+        previous_candidates = [candidate for candidate in valid if candidate < index]
+        next_candidates = [candidate for candidate in valid if candidate > index]
+        previous_index = previous_candidates[-1] if previous_candidates else None
+        next_index = next_candidates[0] if next_candidates else None
+        if previous_index is None:
+            replacement = filled[next_index]
+        elif next_index is None:
+            replacement = filled[previous_index]
+        elif index - previous_index <= next_index - index:
+            replacement = filled[previous_index]
+        else:
+            replacement = filled[next_index]
+        filled[index] = replacement
+    return filled
 '''
 
 

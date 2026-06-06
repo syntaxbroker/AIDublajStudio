@@ -1,7 +1,9 @@
 import base64
+import json
 import os
 import subprocess
 import tempfile
+import time
 import wave
 from pathlib import Path
 
@@ -84,6 +86,7 @@ async def synthesize(
             model_name=model_name,
         )
 
+        synth_started = time.perf_counter()
         try:
             subprocess.run(
                 command,
@@ -95,6 +98,7 @@ async def synthesize(
         except subprocess.CalledProcessError as exc:
             detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
             raise HTTPException(status_code=502, detail=f"CosyVoice synthesis command failed: {detail}") from exc
+        synth_time_ms = int((time.perf_counter() - synth_started) * 1000)
 
         if not output_path.exists():
             raise HTTPException(status_code=502, detail="CosyVoice synthesis command did not produce output audio")
@@ -111,9 +115,23 @@ async def synthesize(
 
         audio_bytes = output_path.read_bytes()
         duration_ms = int((frame_count / frame_rate) * 1000)
+        runner_metadata_path = output_path.with_suffix(".json")
+        runner_metadata = {}
+        if runner_metadata_path.exists():
+            try:
+                runner_metadata = json.loads(runner_metadata_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                runner_metadata = {}
         return {
             "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
             "duration_ms": duration_ms,
             "sample_rate": frame_rate,
             "model_name": model_name or os.getenv("COSYVOICE_MODEL_NAME", "CosyVoice"),
+            "metadata_json": {
+                **runner_metadata,
+                "device": os.getenv("COSYVOICE_DEVICE", "auto"),
+                "reference_encode_time_ms": None,
+                "synth_time_ms": synth_time_ms,
+                "total_time_ms": synth_time_ms,
+            },
         }

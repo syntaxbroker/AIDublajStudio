@@ -49,6 +49,31 @@ class MediaPipelineService:
 
             source_path = self.storage.absolute_path(source_artifact.storage_path)
             metadata = self.ffprobe.probe(source_path)
+            source_width, source_height, source_frame_rate, source_audio_channels, source_sample_rate = self._stream_metrics(metadata)
+            source_artifact.duration_ms = self._duration_ms(metadata)
+            source_artifact.width = source_width
+            source_artifact.height = source_height
+            source_artifact.frame_rate = source_frame_rate
+            source_artifact.audio_channels = source_audio_channels
+            source_artifact.sample_rate = source_sample_rate
+            source_artifact.metadata_json = {
+                **(source_artifact.metadata_json or {}),
+                **metadata,
+                "source_width": source_width,
+                "source_height": source_height,
+                "working_width": source_width,
+                "working_height": source_height,
+                "resolution_preservation_policy": "source",
+            }
+            project.metadata_json = {
+                **(project.metadata_json or {}),
+                "source_width": source_width,
+                "source_height": source_height,
+                "working_width": source_width,
+                "working_height": source_height,
+                "resolution_preservation_policy": "source",
+            }
+            project.updated_at = datetime.now(UTC)
             metadata_artifact = self._create_metadata_artifact(project.storage_key, source_artifact, job.id, metadata)
             self.events.publish_audit(
                 project_id=project.id,
@@ -179,6 +204,8 @@ class MediaPipelineService:
         checksum = self._sha256(payload)
         duration_ms = self._duration_ms(metadata)
         width, height, frame_rate, audio_channels, sample_rate = self._stream_metrics(metadata)
+        source_width = parent_artifact.width or (parent_artifact.metadata_json or {}).get("source_width")
+        source_height = parent_artifact.height or (parent_artifact.metadata_json or {}).get("source_height")
         return self._create_child_artifact(
             parent_artifact=parent_artifact,
             job_id=job_id,
@@ -194,7 +221,15 @@ class MediaPipelineService:
             frame_rate=frame_rate,
             audio_channels=audio_channels,
             sample_rate=sample_rate,
-            metadata_json=metadata,
+            metadata_json={
+                **metadata,
+                "source_width": source_width,
+                "source_height": source_height,
+                "working_width": width,
+                "working_height": height,
+                "resolution_preserved": bool(source_width == width and source_height == height),
+                "resolution_preservation_policy": "source",
+            },
         )
 
     def _create_waveform_artifact(self, storage_key: str, parent_artifact: Artifact, job_id: str, source_path: Path) -> Artifact:

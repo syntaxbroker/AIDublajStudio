@@ -10,6 +10,7 @@ from app.models.character import CharacterAssignment
 from app.models.timeline_clip import TimelineClip
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.timeline_repository import TimelineRepository
+from app.services.translation_adaptation import build_adaptation_metadata
 from app.schemas.timeline import (
     TimelineClipMergeRequest,
     TimelineClipResponse,
@@ -256,6 +257,8 @@ class TimelineService:
         metadata = dict(clip.metadata_json or {})
         metadata["text"] = clip.text
         metadata["translated_text"] = clip.translation_text
+        if clip.translation_text:
+            metadata.update(build_adaptation_metadata(self._duration_ms(clip), clip.translation_text))
         metadata["speaker_label"] = clip.speaker_label
         metadata["character_id"] = clip.character_id
         clip.metadata_json = metadata
@@ -294,6 +297,9 @@ class TimelineService:
             event_type=EventType.CHARACTER_ASSIGNED_TO_TIMELINE.value,
             payload_json={"character_id": clip.character_id, "speaker_label": clip.speaker_label},
         )
+
+    def _duration_ms(self, clip: TimelineClip) -> int:
+        return max(int(clip.end_ms or 0) - int(clip.start_ms or 0), 1)
 
     def _join_values(self, values: list[str | None]) -> str | None:
         cleaned = [value.strip() for value in values if value and value.strip()]

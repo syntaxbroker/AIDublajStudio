@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import enforce_ui_provider_safety, get_current_user
 from app.core.openapi import COMMON_ERROR_RESPONSES
 from app.db.session import get_db
 from app.schemas.project import ProjectDetailResponse
@@ -15,6 +15,7 @@ router = APIRouter()
 def upload_source_video(
     project_id: str,
     file: UploadFile = File(...),
+    _provider_safety: None = Depends(enforce_ui_provider_safety),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProjectDetailResponse:
