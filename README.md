@@ -1,5 +1,17 @@
 # AI Dublaj Stüdyosu
 
+## Release v1.0.2
+
+Bu release kalite ve operabilite odakli bir stabilizasyon surumudur.
+
+- Source resolution preservation policy eklendi: input resolution output resolution ile eslesmelidir.
+- Proxy, MuseTalk ve final render zincirinde sessiz 720p/1080p downscale engellendi.
+- Final render dusuk cozunurluklu video kaynagini upscale ederek basari saymaz; mismatch durumunda fail-fast davranir.
+- Project/artifact metadata icinde source_width, source_height, working_width, working_height ve resolution_preserved alanlari tasinir.
+- MuseTalk default calisma ayari source-native yapildi.
+- Pipeline job log viewer, retry ve clear aksiyonlari UI/API tarafina eklendi.
+- TTS/SeedVC dropout ve duration trimming guvenlikleri iyilestirildi.
+
 Bu repository, lokal ağ üzerinde çalışan AI destekli video dublaj sistemi için başlangıç mimarisini, veri modelini ve geliştirme ortamı iskeletini içerir.
 
 İlk hedef:
